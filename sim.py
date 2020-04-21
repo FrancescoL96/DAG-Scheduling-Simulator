@@ -6,7 +6,7 @@ n_cpu = 2
 n_gpu = 1
 PROCESSORS = float(n_cpu+n_gpu)	# Used in the formula to calculate priority points for G-FL
 DEADLINE = False # If set to true it will schedule using EDD, otherwise G-FL
-FRAMES = 10
+FRAMES = 3
 
 """
 There is a class Node, which rappresents a single computing node, such as Fast, or Scale, it has various fields, which are used to create the dependencies' graph
@@ -346,10 +346,10 @@ def main():
 	scale[0][0].set_gpu()
 	
 	for execution in range(0, FRAMES):
-		# First node of each execution has special treatment due to special constraints
+		# First node of each execution has special treatment due to special constraints 
 		if execution > 0:
 			scale[execution].append(Node('scale', 0, scale_timings_cpu[0], [scale[execution-1][0]], execution, scale_timings_gpu[0]))
-			#scale[execution][0].set_gpu()
+			scale[execution][0].set_gpu()
 		# As scale_0 are set outside, we need to skip them here, where we initialize all the other nodes
 		for level in range(1, levels):
 			scale[execution].append(Node('scale', level, scale_timings_cpu[level], [scale[execution][level-1]], execution, scale_timings_gpu[level]))
@@ -370,9 +370,7 @@ def main():
 		deep_learning[execution].append(Node('deep_learning', 0, -1, [scale[execution][0]], execution, deep_learning_timings_gpu[0]))
 		deep_learning[execution][0].set_gpu()
 		
-		scale[execution][1].set_gpu(False)
-		
-	
+
 	all_nodes = []
 	max_queue_value = 0 # this value is used to normalize deadlines or priorities based on the execution number
 	for execution in range(0, FRAMES):
@@ -402,11 +400,13 @@ def main():
 		all_nodes.append(deep_learning[execution][0])
 		
 	# Normalizes priorities based on the execution number, giving more priority to earlier frames
+	
 	for node in all_nodes:
 		if (DEADLINE):
 			node.deadline += max_queue_value * node.execution # There is no change in deadline or priority if its the first frame
 		else:
 			node.priority_point += max_queue_value * node.execution
+	
 	
 	# All the nodes are ordered by their priority point (as G-FL demands) or deadline
 	if (DEADLINE):
