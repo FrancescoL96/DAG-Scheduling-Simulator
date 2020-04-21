@@ -29,6 +29,7 @@ class Node:
 		self.required_by = []				# Which nodes require this be completed (sed to calculate deadlines)
 		self.deadline = 1.0					# EDD deadline, calculated using recursive formula: EDD(n) = [for each successor s] - min(EDD(s) - WCET - Cpy)
 		self.priority_point = 0.0			# Proprity value for G-FL scheduling, calculated for each node using: Y = Deadline - ((Procs - 1)/Procs) * WCET - min [for each job j] (Deadline_j - ((Procs - 1)/Procs) * WCET_j)
+		# Currently using the relative priority point formula: Y = Deadline - ((Procs - 1)/Procs) * WCET
 	
 	# If this function is called, is_gpu is set to True, allowing the code to use time_gpu for execution time intead of time (which should be used for cpu time)
 	def set_gpu(self):
@@ -103,7 +104,7 @@ class Schedule:
 		self.node_list = execution_elements_cpu + execution_elements_gpu
 		times = times_cpu + times_gpu
 
-		self.verified = False # If there is no violation of dependencies the scheduling this variable is set to True
+		self.verified = False # If there is no violation of dependencies in the scheduling this variable is set to True
 		# Verifies the scheduling
 		for computing_element in self.node_list:
 			for node in computing_element:
@@ -229,7 +230,7 @@ def create_dependencies_graph_rec(end_points):
 				if end_point not in required.required_by:
 					required.required_by.append(end_point)
 		
-# Starting from an array of leaves (nodes that do not depend on any other) it calculates for each leaf in leaves the deadlines for EDD and priority points for G-FL, using EDD_auto_rec
+# Starting from an array of leaves (nodes that do not depend on any other) it calculates for each leaf in leaves the deadlines for EDD, using EDD_auto_rec
 def EDD_auto(leaves):
 	for leaf in leaves:
 		EDD_auto_rec(leaf, [])
@@ -261,114 +262,119 @@ def calculate_priority_points(all_nodes):
 		else:
 			node.priority_point = float(node.deadline - ((PROCESSORS - 1)/PROCESSORS)*node.time)
 		
-# Timings and dependencies should be imported from a file, for now they are hardcoded
-execution = 0 # This variable is a place holder to introduce pipelining
+def main():
+	# Timings and dependencies should be imported from a file, for now they are hardcoded
+	execution = 0 # This variable is a place holder to introduce pipelining
 
-# Creates all the nodes, this should be put in iterable structures to allow for pipelining
-scale_0 = Node('scale_0', 0, 2.5, [], execution, 1.25)
-scale_1 = Node('scale_1', 1, 2, [scale_0], execution, 1)
-scale_2 = Node('scale_2', 2, 1.6, [scale_1], execution, 0.8)
-scale_3 = Node('scale_3', 3, 1.28, [scale_2], execution, 0.64)
-scale_4 = Node('scale_4', 4, 1.02, [scale_3], execution, 0.51)
-scale_5 = Node('scale_5', 5, 0.82, [scale_4], execution, 0.41)
-scale_6 = Node('scale_6', 6, 0.66, [scale_5], execution, 0.33)
-scale_7 = Node('scale_7', 7, 0.53, [scale_6], execution, 0.26)
+	# Creates all the nodes, this should be put in iterable structures to allow for pipelining
+	scale_0 = Node('scale_0', 0, 2.5, [], execution, 1.25)
+	scale_1 = Node('scale_1', 1, 2, [scale_0], execution, 1)
+	scale_2 = Node('scale_2', 2, 1.6, [scale_1], execution, 0.8)
+	scale_3 = Node('scale_3', 3, 1.28, [scale_2], execution, 0.64)
+	scale_4 = Node('scale_4', 4, 1.02, [scale_3], execution, 0.51)
+	scale_5 = Node('scale_5', 5, 0.82, [scale_4], execution, 0.41)
+	scale_6 = Node('scale_6', 6, 0.66, [scale_5], execution, 0.33)
+	scale_7 = Node('scale_7', 7, 0.53, [scale_6], execution, 0.26)
 
-fast_0 = Node('fast_0', 0, 25, [scale_0], execution, 2)
-fast_1 = Node('fast_1', 1, 20, [scale_1], execution, 1.6)
-fast_2 = Node('fast_2', 2, 16, [scale_2], execution, 1.28)
-fast_3 = Node('fast_3', 3, 12.8, [scale_3], execution, 1.02)
-fast_4 = Node('fast_4', 4, 10.24, [scale_4], execution, 0.82)
-fast_5 = Node('fast_5', 5, 8.19, [scale_5], execution, 0.66)
-fast_6 = Node('fast_6', 6, 6.55, [scale_6], execution, 0.53)
-fast_7 = Node('fast_7', 7, 5.24, [scale_7], execution, 0.42)
+	fast_0 = Node('fast_0', 0, 25, [scale_0], execution, 2)
+	fast_1 = Node('fast_1', 1, 20, [scale_1], execution, 1.6)
+	fast_2 = Node('fast_2', 2, 16, [scale_2], execution, 1.28)
+	fast_3 = Node('fast_3', 3, 12.8, [scale_3], execution, 1.02)
+	fast_4 = Node('fast_4', 4, 10.24, [scale_4], execution, 0.82)
+	fast_5 = Node('fast_5', 5, 8.19, [scale_5], execution, 0.66)
+	fast_6 = Node('fast_6', 6, 6.55, [scale_6], execution, 0.53)
+	fast_7 = Node('fast_7', 7, 5.24, [scale_7], execution, 0.42)
 
-grid_tree_angle_0 = Node('grid_tree_angle_0', 0, 7, [fast_0], execution)
-grid_tree_angle_1 = Node('grid_tree_angle_1', 1, 5.6, [fast_1], execution)
-grid_tree_angle_2 = Node('grid_tree_angle_2', 2, 4.48, [fast_2], execution)
-grid_tree_angle_3 = Node('grid_tree_angle_3', 3, 3.58, [fast_3], execution)
-grid_tree_angle_4 = Node('grid_tree_angle_4', 4, 2.86, [fast_4], execution)
-grid_tree_angle_5 = Node('grid_tree_angle_5', 5, 2.29, [fast_5], execution)
-grid_tree_angle_6 = Node('grid_tree_angle_6', 6, 1.83, [fast_6], execution)
-grid_tree_angle_7 = Node('grid_tree_angle_7', 7, 1.46, [fast_7], execution)
+	grid_tree_angle_0 = Node('grid_tree_angle_0', 0, 7, [fast_0], execution)
+	grid_tree_angle_1 = Node('grid_tree_angle_1', 1, 5.6, [fast_1], execution)
+	grid_tree_angle_2 = Node('grid_tree_angle_2', 2, 4.48, [fast_2], execution)
+	grid_tree_angle_3 = Node('grid_tree_angle_3', 3, 3.58, [fast_3], execution)
+	grid_tree_angle_4 = Node('grid_tree_angle_4', 4, 2.86, [fast_4], execution)
+	grid_tree_angle_5 = Node('grid_tree_angle_5', 5, 2.29, [fast_5], execution)
+	grid_tree_angle_6 = Node('grid_tree_angle_6', 6, 1.83, [fast_6], execution)
+	grid_tree_angle_7 = Node('grid_tree_angle_7', 7, 1.46, [fast_7], execution)
 
-gauss_0 = Node('gauss_0', 0, 2.8, [scale_0], execution, 0.5)
-gauss_1 = Node('gauss_1', 1, 2.24, [scale_1], execution, 0.4)
-gauss_2 = Node('gauss_2', 2, 1.79, [scale_2], execution, 0.32)
-gauss_3 = Node('gauss_3', 3, 1.43, [scale_3], execution, 0.26)
-gauss_4 = Node('gauss_4', 4, 1.14, [scale_4], execution, 0.21)
-gauss_5 = Node('gauss_5', 5, 0.91, [scale_5], execution, 0.17)
-gauss_6 = Node('gauss_6', 6, 0.73, [scale_6], execution, 0.14)
-gauss_7 = Node('gauss_7', 7, 0.58, [scale_7], execution, 0.11)
-	
-orb_0 = Node('orb_0', 0, 3.6, [gauss_0, grid_tree_angle_0], execution, 2.2)
-orb_1 = Node('orb_1', 1, 2.88, [gauss_1, grid_tree_angle_1], execution, 1.76)
-orb_2 = Node('orb_2', 2, 2.3, [gauss_2, grid_tree_angle_2], execution, 1.41)
-orb_3 = Node('orb_3', 3, 1.84, [gauss_3, grid_tree_angle_3], execution, 1.13)
-orb_4 = Node('orb_4', 4, 1.47, [gauss_4, grid_tree_angle_4], execution, 0.9)
-orb_5 = Node('orb_5', 5, 1.18, [gauss_5, grid_tree_angle_5], execution, 0.72)
-orb_6 = Node('orb_6', 6, 0.94, [gauss_6, grid_tree_angle_6], execution, 0.58)
-orb_7 = Node('orb_7', 7, 0.75, [gauss_7, grid_tree_angle_7], execution, 0.46)
-
-deep_learning = Node('deep_learning', 0, -1, [scale_0], execution, 15)
-
-# GPU NODES ----------------------------------------------------------------
-scale_0.set_gpu()
-scale_1.set_gpu()
-scale_2.set_gpu()
-scale_3.set_gpu()
-scale_4.set_gpu()
-scale_5.set_gpu()
-scale_6.set_gpu()
-scale_7.set_gpu()
-
-fast_0.set_gpu()
-fast_1.set_gpu()
-fast_2.set_gpu()
-fast_3.set_gpu()
-fast_4.set_gpu()
-fast_5.set_gpu()
-fast_6.set_gpu()
-fast_7.set_gpu()
-
-gauss_0.set_gpu()
-gauss_1.set_gpu()
-gauss_2.set_gpu()
-gauss_3.set_gpu()
-gauss_4.set_gpu()
-gauss_5.set_gpu()
-gauss_6.set_gpu()
-gauss_7.set_gpu()
-
-orb_0.set_gpu()
-orb_1.set_gpu()
-orb_2.set_gpu()
-orb_3.set_gpu()
-orb_4.set_gpu()
-orb_5.set_gpu()
-orb_6.set_gpu()
-orb_7.set_gpu()
-
-deep_learning.set_gpu()
-
-end_points = [deep_learning, orb_0, orb_1, orb_2, orb_3, orb_4, orb_5, orb_6, orb_7] # This are the nodes that no other node depends on
-create_dependencies_graph_rec(end_points)
-
-EDD_auto([scale_0]) # Creates deadlines
-
-all_nodes = [deep_learning, scale_0, scale_1, scale_2, scale_3, scale_4, scale_5, scale_6, scale_7, fast_0, fast_1, fast_2, fast_3, fast_4, fast_5, fast_6, fast_7, gauss_0, gauss_1, gauss_2, gauss_3, gauss_4, gauss_5, gauss_6, gauss_7, orb_0, orb_1, orb_2, orb_3, orb_4, orb_5, orb_6, orb_7, grid_tree_angle_0, grid_tree_angle_1, grid_tree_angle_2, grid_tree_angle_3, grid_tree_angle_4, grid_tree_angle_5, grid_tree_angle_6, grid_tree_angle_7]
-
-calculate_priority_points(all_nodes)
+	gauss_0 = Node('gauss_0', 0, 2.8, [scale_0], execution, 0.5)
+	gauss_1 = Node('gauss_1', 1, 2.24, [scale_1], execution, 0.4)
+	gauss_2 = Node('gauss_2', 2, 1.79, [scale_2], execution, 0.32)
+	gauss_3 = Node('gauss_3', 3, 1.43, [scale_3], execution, 0.26)
+	gauss_4 = Node('gauss_4', 4, 1.14, [scale_4], execution, 0.21)
+	gauss_5 = Node('gauss_5', 5, 0.91, [scale_5], execution, 0.17)
+	gauss_6 = Node('gauss_6', 6, 0.73, [scale_6], execution, 0.14)
+	gauss_7 = Node('gauss_7', 7, 0.58, [scale_7], execution, 0.11)
 		
-# All the nodes are ordered by their priority point (as G-FL demands) or deadline
-if (DEADLINE):
-	all_nodes.sort(key=lambda x: x.deadline, reverse=False)
-else:
-	all_nodes.sort(key=lambda x: x.priority_point, reverse=False)	
+	orb_0 = Node('orb_0', 0, 3.6, [gauss_0, grid_tree_angle_0], execution, 2.2)
+	orb_1 = Node('orb_1', 1, 2.88, [gauss_1, grid_tree_angle_1], execution, 1.76)
+	orb_2 = Node('orb_2', 2, 2.3, [gauss_2, grid_tree_angle_2], execution, 1.41)
+	orb_3 = Node('orb_3', 3, 1.84, [gauss_3, grid_tree_angle_3], execution, 1.13)
+	orb_4 = Node('orb_4', 4, 1.47, [gauss_4, grid_tree_angle_4], execution, 0.9)
+	orb_5 = Node('orb_5', 5, 1.18, [gauss_5, grid_tree_angle_5], execution, 0.72)
+	orb_6 = Node('orb_6', 6, 0.94, [gauss_6, grid_tree_angle_6], execution, 0.58)
+	orb_7 = Node('orb_7', 7, 0.75, [gauss_7, grid_tree_angle_7], execution, 0.46)
 
-GFL = Schedule(all_nodes, n_cpu, n_gpu)
-print(('Makespan EDD: ' if DEADLINE else 'Makespan G-FL: ')+str(GFL.create_schedule()))
+	deep_learning = Node('deep_learning', 0, -1, [scale_0], execution, 15)
 
-GPU_labels = ['GPU '+str(i) for i in range(0, n_gpu)]
-CPU_labels = ['CPU '+str(i) for i in range(0, n_cpu)]
-GFL.create_bar_graph(labels=GPU_labels + CPU_labels)
+	# GPU NODES ----------------------------------------------------------------
+	scale_0.set_gpu()
+	scale_1.set_gpu()
+	scale_2.set_gpu()
+	scale_3.set_gpu()
+	scale_4.set_gpu()
+	scale_5.set_gpu()
+	scale_6.set_gpu()
+	scale_7.set_gpu()
+
+	fast_0.set_gpu()
+	fast_1.set_gpu()
+	fast_2.set_gpu()
+	fast_3.set_gpu()
+	fast_4.set_gpu()
+	fast_5.set_gpu()
+	fast_6.set_gpu()
+	fast_7.set_gpu()
+
+	gauss_0.set_gpu()
+	gauss_1.set_gpu()
+	gauss_2.set_gpu()
+	gauss_3.set_gpu()
+	gauss_4.set_gpu()
+	gauss_5.set_gpu()
+	gauss_6.set_gpu()
+	gauss_7.set_gpu()
+
+	orb_0.set_gpu()
+	orb_1.set_gpu()
+	orb_2.set_gpu()
+	orb_3.set_gpu()
+	orb_4.set_gpu()
+	orb_5.set_gpu()
+	orb_6.set_gpu()
+	orb_7.set_gpu()
+
+	deep_learning.set_gpu()
+
+	end_points = [deep_learning, orb_0, orb_1, orb_2, orb_3, orb_4, orb_5, orb_6, orb_7] # This are the nodes that no other node depends on
+	create_dependencies_graph_rec(end_points)
+
+	EDD_auto([scale_0]) # Creates deadlines
+
+	all_nodes = [deep_learning, scale_0, scale_1, scale_2, scale_3, scale_4, scale_5, scale_6, scale_7, fast_0, fast_1, fast_2, fast_3, fast_4, fast_5, fast_6, fast_7, gauss_0, gauss_1, gauss_2, gauss_3, gauss_4, gauss_5, gauss_6, gauss_7, orb_0, orb_1, orb_2, orb_3, orb_4, orb_5, orb_6, orb_7, grid_tree_angle_0, grid_tree_angle_1, grid_tree_angle_2, grid_tree_angle_3, grid_tree_angle_4, grid_tree_angle_5, grid_tree_angle_6, grid_tree_angle_7]
+
+	calculate_priority_points(all_nodes)
+			
+	# All the nodes are ordered by their priority point (as G-FL demands) or deadline
+	if (DEADLINE):
+		all_nodes.sort(key=lambda x: x.deadline, reverse=False)
+	else:
+		all_nodes.sort(key=lambda x: x.priority_point, reverse=False)	
+
+	GFL = Schedule(all_nodes, n_cpu, n_gpu)
+	print(('Makespan EDD: ' if DEADLINE else 'Makespan G-FL: ')+str(GFL.create_schedule()))
+
+	GPU_labels = ['GPU '+str(i) for i in range(0, n_gpu)]
+	CPU_labels = ['CPU '+str(i) for i in range(0, n_cpu)]
+	GFL.create_bar_graph(labels=GPU_labels + CPU_labels)
+
+
+if __name__ == '__main__':
+	main()
