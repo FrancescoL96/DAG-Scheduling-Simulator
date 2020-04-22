@@ -1,6 +1,7 @@
-from decimal import Decimal, ROUND_HALF_EVEN
+import sys
 import matplotlib.pyplot as plt 
 import matplotlib.patches as mpatches
+from decimal import Decimal, ROUND_HALF_EVEN
 
 n_cpu = 2
 n_gpu = 1
@@ -89,7 +90,7 @@ class Schedule:
 			# Calculates how much the highest priority node needs to wait before it can run
 			priority_candidate_delay = self.does_this_node_need_to_wait(available[0], times_gpu, times_cpu)
 			
-			# If there are any candidates that can run (other than the highest priority node), it takes the one that takes the lowest time, and checks if it can be slotted in the delay of the highest priority task (basically no deadline gets changed, but some task might get run earlier)
+			# If there are any candidates that can run (other than the highest priority node), it tries from the one that takes the lowest time, and checks if it can be slotted in the delay of the highest priority task (basically no deadline gets changed, but some tasks might get run earlier)
 			found = False
 			while candidates and not found:
 				minimum_time_needed = min(candidates, key=lambda x: x[1])	
@@ -115,7 +116,7 @@ class Schedule:
 				node.scheduled_time = times_cpu[times_cpu.index(min(times_cpu))] + node.delay				
 				times_cpu[times_cpu.index(min(times_cpu))] += node.time + node.delay + node.copy_time
 			for next in node.required_by:
-				# the length check on requirmenets is place so that if a node that was needed by the one just executed depends on more than one node we can verify all dependencies before we add it to those that can be scheduled
+				# the length check on requirmenets is placed so that if a node that was needed by the one just executed depends on more than one node we can verify all dependencies before we add it to those that can be scheduled
 				if (next.scheduled_time == -1 and next not in available and len(next.requirements) <= 1):
 					available.append(next)
 				else:
@@ -346,7 +347,7 @@ def main():
 	scale[0][0].set_gpu()
 	
 	for execution in range(0, FRAMES):
-		# First node of each execution has special treatment due to special constraints 
+		# First node of each execution has special treatment due to special constraints
 		if execution > 0:
 			scale[execution].append(Node('scale', 0, scale_timings_cpu[0], [scale[execution-1][0]], execution, scale_timings_gpu[0]))
 			scale[execution][0].set_gpu()
@@ -370,7 +371,6 @@ def main():
 		deep_learning[execution].append(Node('deep_learning', 0, -1, [scale[execution][0]], execution, deep_learning_timings_gpu[0]))
 		deep_learning[execution][0].set_gpu()
 		
-
 	all_nodes = []
 	max_queue_value = 0 # this value is used to normalize deadlines or priorities based on the execution number
 	for execution in range(0, FRAMES):
@@ -407,7 +407,6 @@ def main():
 		else:
 			node.priority_point += max_queue_value * node.execution
 	
-	
 	# All the nodes are ordered by their priority point (as G-FL demands) or deadline
 	if (DEADLINE):
 		all_nodes.sort(key=lambda x: x.deadline, reverse=False)
@@ -422,4 +421,14 @@ def main():
 	GFL.create_bar_graph(labels=GPU_labels + CPU_labels)
 
 if __name__ == '__main__':
+	if (len(sys.argv) == 3):
+		try:
+			FRAMES = int(sys.argv[1])
+			DEADLINE = bool(int(sys.argv[2]))
+		except:
+			print('Usage: \n sim.py FRAMES(n) DEADLINE(0,1)\nExample: three frames simulated and EDD\n\tsim.py 3 1', file=sys.stderr)
+			exit()
+	elif (len(sys.argv) == 2):
+		if (sys.argv[1][0]) == '?':
+			print('Usage: \n sim.py FRAMES(n) DEADLINE(0,1)\nExample: three frames simulated and EDD\n\tsim.py 3 1\nRunning with default settings: \n\tFrames: '+str(FRAMES) + ' Deadline: '+str(DEADLINE))
 	main()
