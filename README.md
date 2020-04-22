@@ -8,9 +8,11 @@ Examples:
 Simulates using G-FL and 3 frames, loading from "timings.csv" (Default settings)
 
 - sim.py
+
 Simulates using G-FL and 2 frames, loading from "timings.csv"
 
 - sim.py 0 2
+
 Simulates using EDD and 10 frames, loading from "time.csv"
 
 - sim.py times.csv 1 10
