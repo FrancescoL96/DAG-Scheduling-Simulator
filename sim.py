@@ -7,14 +7,13 @@ FILENAME = 'timings.csv'
 n_cpu = 2
 n_gpu = 1
 PROCESSORS = float(n_cpu+n_gpu)	# Used in the formula to calculate priority points for G-FL
-DEADLINE = False # If set to true it will schedule using EDD, otherwise G-FL
+DEADLINE = False # If set to true it will schedule using EDD, otherwise G-FL (CPU only)
 FRAMES = 3
-
 """
-There is a class Node, which rappresents a single computing node, such as Fast, or Scale, it has various fields, which are used to create the dependencies' graph
-and to verify the scheduling
-The scheduling is created, verified and shown by the class Schedule, which taken a list of nodes, once it has created the scheduling, verifies that all temporal restrictions are respected
-There are a couple functions (EDD_auto, EDD_auto_rec, create_dependencies_graph_rec, calculate_priority_points) which are used to compute some additional data on the nodes, specifically, EDD deadlines and dependencies in the reverse order. The last function calculates priority points for G-FL
+Structure
+	Classes 	(2)
+	Functions	(5)
+	Main		(1)
 """
 class Node:
 	def __init__(self, name, level, time, requirements, execution, time_gpu = -1, copy_time = 0):
@@ -59,8 +58,9 @@ class Node:
 # This class creates and verifies the scheduling, prints the scheduling only if it is verified
 class Schedule:
 	# Takes as parameter a list of all nodes ordered by priority
-	def __init__(self, node_list, n_cpu, n_gpu):
-		self.node_list = node_list
+	def __init__(self, node_list_cpu, node_list_gpu, n_cpu, n_gpu):
+		self.node_list_cpu = node_list_cpu
+		self.node_list_gpu = node_list_gpu
 		self.verified = False
 		self.max_time = 0
 		self.n_cpu = n_cpu
@@ -72,60 +72,85 @@ class Schedule:
 		execution_elements_cpu = [[] for i in range(0, self.n_cpu)]
 		execution_elements_gpu = [[] for i in range(0, self.n_gpu)]
 		# Creates the same lists to save times (at what time is the computation) for each processor
-		times_cpu = [0 for i in range(0, self.n_cpu)]
-		times_gpu = [0 for i in range(0, self.n_gpu)]
-		available = [] 
-		available.append(self.node_list[0])
+		times_cpu = [[(0.0,0.0)] for i in range(0, self.n_cpu)]
+		times_gpu = [[(0.0,0.0)] for i in range(0, self.n_gpu)]
+		
+		available_cpu = []
+		available_gpu = []
+		
+		available_cpu.append(self.node_list_cpu[0])
+		available_gpu.append(self.node_list_gpu[0])
+
 		# Run while there are nodes that can run
-		while available:
-			node = available[0] # The next node to schedule is the highest priority
-			self.set_minimum_start_time(node)
-			if (node.is_gpu):
-				# Adds this node to the GPU with the smallest current time
-				execution_elements_gpu[times_gpu.index(min(times_gpu))].append(node)
-				# If the current time is less than the minimum time for this specific node, a delay is added to make sure all dependencies are met
-				node.delay = node.scheduled_time - times_gpu[times_gpu.index(min(times_gpu))] if node.scheduled_time - times_gpu[times_gpu.index(min(times_gpu))] > 0 else 0
-				# The node's scheduled time is updated
-				old_scheduled = node.scheduled_time
-				node.scheduled_time = times_gpu[times_gpu.index(min(times_gpu))] + node.delay
-				# If the time projection for scheduling was wrong and the node gets scheduled later then dependent nodes need to be checked
-				if old_scheduled < node.scheduled_time:
-					print(node)
-					for n in node.required_by:
-						if n.scheduled_time < node.scheduled_time:
-							n.scheduled_time = -1
-							print('Invalidated: '+str(n.name)+'_'+str(n.level))
-				# The current time for this processor is updated
-				times_gpu[times_gpu.index(min(times_gpu))] += node.time_gpu + node.delay + node.copy_time
-			else:
-				# Behaves like above, but for CPU cores
-				execution_elements_cpu[times_cpu.index(min(times_cpu))].append(node)
-				node.delay = node.scheduled_time - times_cpu[times_cpu.index(min(times_cpu))] if node.scheduled_time - times_cpu[times_cpu.index(min(times_cpu))] > 0 else 0
-				old_scheduled = node.scheduled_time
-				node.scheduled_time = times_cpu[times_cpu.index(min(times_cpu))] + node.delay
-				if old_scheduled < node.scheduled_time:
-					for n in node.required_by:
-						if n.scheduled_time < node.scheduled_time:
-							n.scheduled_time = -1
-				times_cpu[times_cpu.index(min(times_cpu))] += node.time + node.delay + node.copy_time
-			for next in node.required_by:
-				# the length check on requirmenets is placed so that if a node that was needed by the one just executed depends on more than one node we can verify all dependencies before we add it to those that can be scheduled
-				if (next.scheduled_time == -1 and next not in available and len(next.requirements) <= 1):
-					available.append(next)
-				else:
-					# If any one the dependencies is not met (one is met for sure: 'node' has just been executed, and it is a dependency for next), we cannot add it to the available nodes 
-					append = True
-					for check in next.requirements:
-						if check.scheduled_time == -1:
-							append = False
-					if (append and next not in available and next.scheduled_time == -1):
-						available.append(next)
-			available.remove(node)
+		while available_gpu or available_cpu:
+			# If there are nodes available for a GPU
+			if (available_gpu):
+				node = available_gpu[0]
+				# Check whats the minimum starting time for this node
+				self.set_minimum_start_time(node)
+				# It requirements are not met the minimum start time is not set and we go on to a CPU node below
+				if (node.scheduled_time != -1):
+					# Adds this node to the GPU with the smallest current time
+					min_time_gpu = [10000, -1]
+					for gpu in times_gpu:
+						if min_time_gpu[0] > gpu[-1][1]:
+							min_time_gpu[0] = gpu[-1][1]
+							min_time_gpu[1] = times_gpu.index(gpu)
+					execution_elements_gpu[min_time_gpu[1]].append(node)
+					# If the current time is less than the minimum time for this specific node, a delay is added to make sure all dependencies are met
+					node.delay = node.scheduled_time - times_gpu[min_time_gpu[1]][-1][1] if node.scheduled_time - times_gpu[min_time_gpu[1]][-1][1] > 0 else 0
+					# The node's scheduled time is updated
+					node.scheduled_time = times_gpu[min_time_gpu[1]][-1][1] + node.delay
+					# The current time for this processor is updated
+					times_gpu[min_time_gpu[1]].append((node.scheduled_time, node.scheduled_time + node.time_gpu + node.copy_time))
+					
+					for next in node.required_by:
+					# the length check on requirmenets is placed so that if a node that was needed by the one just executed depends on more than one node we can verify all dependencies before we add it to those that can be scheduled
+						append = True
+						for check in next.requirements:
+							if check.scheduled_time == -1:
+								append = False
+						if (next.is_gpu):
+							if (append and next not in available_gpu and next.scheduled_time == -1):
+								available_gpu.append(next)
+						else:
+							if (append and next not in available_cpu and next.scheduled_time == -1):
+								available_cpu.append(next)
+					available_gpu.remove(node)
+			
+			# Behaves like above, but for CPU cores
+			if (available_cpu):
+				node = available_cpu[0]
+				self.set_minimum_start_time(node)
+				if (node.scheduled_time != -1):
+					min_time_cpu = [10000, -1]
+					for cpu in times_cpu:
+						if min_time_cpu[0] > cpu[-1][1]:
+							min_time_cpu[0] = cpu[-1][1]
+							min_time_cpu[1] = times_cpu.index(cpu)
+					execution_elements_cpu[min_time_cpu[1]].append(node)
+					node.delay = node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] if node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] > 0 else 0
+					node.scheduled_time = times_cpu[min_time_cpu[1]][-1][1] + node.delay
+					times_cpu[min_time_cpu[1]].append((node.scheduled_time, node.scheduled_time + node.time + node.copy_time))
+					for next in node.required_by:
+						append = True
+						for check in next.requirements:
+							if check.scheduled_time == -1:
+								append = False
+						if (next.is_gpu):
+							if (append and next not in available_gpu and next.scheduled_time == -1):
+								available_gpu.append(next)
+						else:
+							if (append and next not in available_cpu and next.scheduled_time == -1):
+								available_cpu.append(next)
+					available_cpu.remove(node)
 			
 			if (DEADLINE):
-				available.sort(key=lambda x: x.deadline, reverse=False)
+				available_cpu.sort(key=lambda x: x.deadline, reverse=False)
+				available_gpu.sort(key=lambda x: x.deadline, reverse=False)
 			else:
-				available.sort(key=lambda x: x.priority_point, reverse=False)
+				available_cpu.sort(key=lambda x: x.priority_point, reverse=False)
+				available_gpu.sort(key=lambda x: x.deadline, reverse=False)
 		
 		# TODO
 		# Add can_it_be_scheduled_earlier
@@ -157,7 +182,7 @@ class Schedule:
 						if (node_scheduled_time.compare(required_cpu_time) == -1):
 							self.error_function(node, required, node_scheduled_time, self.node_list.index(computing_element))
 		self.verified = True
-		self.max_time = round(max(times), 2)
+		self.max_time = round(max(times, key=lambda x: x[-1][1])[-1][1], 2)
 		return self.max_time
 		
 	""" 
@@ -176,17 +201,10 @@ class Schedule:
 	
 	def set_minimum_start_time(self, node):
 		# the minimum time possible for this node is the maximum time (scheduled + runtime) obtained from all its dependencies, if this node has no requirements then it can start at time 0
-		node.scheduled_time = max((req.scheduled_time + req.copy_time + (req.time_gpu if req.is_gpu else req.time) for req in node.requirements)) if node.requirements else 0
-		
-	# If the node cannot start but needs to wait, return True
-	def does_this_node_need_to_wait(self, node, times_gpu, times_cpu):
-		if (node.is_gpu):
-			return node.scheduled_time - times_gpu[times_gpu.index(min(times_gpu))] if node.scheduled_time - times_gpu[times_gpu.index(min(times_gpu))] > 0 else 0
-		else:
-			return node.scheduled_time - times_cpu[times_cpu.index(min(times_cpu))] if node.scheduled_time - times_cpu[times_cpu.index(min(times_cpu))] > 0 else 0
-	
-	def they_share_the_same_processor(self, node_0, node_1):
-		return node_0.is_gpu == node_1.is_gpu
+		for req in node.requirements:
+			if req.scheduled_time == -1:
+				return -1
+		node.scheduled_time = max((req.scheduled_time + req.copy_time + (req.time_gpu if req.is_gpu else req.time) for req in node.requirements)) if node.requirements else 0	
 		
 	"""
 	def can_it_be_scheduled_earlier()
@@ -319,14 +337,15 @@ def EDD_auto_rec(leaf, visited):
 # Normalizes priorities by summing the lowest value (as they are all negativs) and then, based on the execution number, giving more priority to earlier frames	
 def normalize_deadlines(all_nodes_exec):
 		# Normalizes from earliest deadline negative, to earliest deadline zero
-		min_deadline =  - 1.0 * sum(node.deadline for node in all_nodes_exec)
+		min_deadline =  - 1.0 * min(node.deadline for node in all_nodes_exec)
 		for node in all_nodes_exec:
 			node.deadline += min_deadline
+		
 		# Increases deadline for all nodes based on the execution number
 		max_queue_value = max(node.deadline for node in all_nodes_exec)
 		for node in all_nodes_exec:
 			node.deadline += max_queue_value * (node.execution) # There is no change in deadline or priority if its the first frame (0)
-
+		
 # Normalizes deadlines and calculates priority points
 def calculate_priority_points(all_nodes):
 	for node in all_nodes:
@@ -384,8 +403,6 @@ def main():
 			
 			gauss[execution].append(Node('gauss', level, timings['gauss_cpu'][level], [scale[execution][level]], execution, timings['gauss_gpu'][level]))
 			gauss[execution][level].set_gpu()
-			#if (level > 2):
-			#	gauss[execution][level].set_gpu()
 			
 			if (level == 7 and execution > 0):
 				# A Frame cannot complete computing before an earlier one
@@ -397,7 +414,11 @@ def main():
 		deep_learning[execution].append(Node('deep_learning', 0, timings['deep_learning_cpu'][0], [scale[execution][0]], execution, timings['deep_learning_gpu'][0]))
 		deep_learning[execution][0].set_gpu()
 		
-	all_nodes = []
+		#scale[execution][1].set_gpu(False)
+		#gauss[execution][0].set_gpu(False)
+		
+	all_nodes_cpu = []
+	all_nodes_gpu = []
 	max_queue_value = 0 # this value is used to normalize deadlines or priorities based on the execution number
 	for execution in range(0, FRAMES):
 		end_points = [orb[execution][i] for i in range (0, levels)]	# This are the nodes that no other node depends on
@@ -414,25 +435,52 @@ def main():
 			all_nodes_exec.append(gauss[execution][i])
 			all_nodes_exec.append(orb[execution][i])
 			# These are ALL the nodes used for the scheduling
-			all_nodes.append(scale[execution][i])
-			all_nodes.append(fast[execution][i])
-			all_nodes.append(grid[execution][i])
-			all_nodes.append(gauss[execution][i])
-			all_nodes.append(orb[execution][i])
-		
+			# They are added to the respective queue if they are a GPU node or not
+			# Scale
+			if scale[execution][i].is_gpu:
+				all_nodes_gpu.append(scale[execution][i])
+			else:
+				all_nodes_cpu.append(scale[execution][i])
+			# Fast
+			if fast[execution][i].is_gpu:
+				all_nodes_gpu.append(fast[execution][i])
+			else:
+				all_nodes_cpu.append(fast[execution][i])
+			# Grid
+			if grid[execution][i].is_gpu:
+				all_nodes_gpu.append(grid[execution][i])
+			else:
+				all_nodes_cpu.append(grid[execution][i])
+			# Gauss
+			if gauss[execution][i].is_gpu:
+				all_nodes_gpu.append(gauss[execution][i])
+			else:
+				all_nodes_cpu.append(gauss[execution][i])
+			# Orb
+			if orb[execution][i].is_gpu:
+				all_nodes_gpu.append(orb[execution][i])
+			else:
+				all_nodes_cpu.append(orb[execution][i])
+
 		
 		normalize_deadlines(all_nodes_exec)
 		calculate_priority_points(all_nodes_exec)
-		
-		all_nodes.append(deep_learning[execution][0])
+		# Deep learning is GPU only and has no levels so its added outside the for cycle
+		all_nodes_gpu.append(deep_learning[execution][0])
 	
 	# All the nodes are ordered by their priority point (as G-FL demands) or deadline
 	if (DEADLINE):
-		all_nodes.sort(key=lambda x: x.deadline, reverse=False)
+		all_nodes_cpu.sort(key=lambda x: x.deadline, reverse=False)
+		all_nodes_gpu.sort(key=lambda x: x.deadline, reverse=False)
 	else:
-		all_nodes.sort(key=lambda x: x.priority_point, reverse=False)		
+		all_nodes_cpu.sort(key=lambda x: x.priority_point, reverse=False)		
+		all_nodes_gpu.sort(key=lambda x: x.deadline, reverse=False)
+	
+	# Sort all nodes using a stable algorithm by execution (if they have the same priority the earlier executions go first)
+	all_nodes_cpu.sort(key=lambda x: x.execution, reverse=False)
+	all_nodes_gpu.sort(key=lambda x: x.execution, reverse=False)
 		
-	GFL = Schedule(all_nodes, n_cpu, n_gpu)
+	GFL = Schedule(all_nodes_cpu, all_nodes_gpu, n_cpu, n_gpu)
 	max_time = GFL.create_schedule()
 	print(('Makespan EDD: ' if DEADLINE else 'Makespan G-FL: ')+str(max_time)+ ', Average Frame Time: '+str(round(float(max_time/FRAMES), 2)))
 
@@ -443,10 +491,14 @@ def main():
 	max_lateness = 0
 	n_nodes = 0
 	avg_lateness = 0
-	for node in all_nodes:
+	for node in all_nodes_cpu:
 		n_nodes += 1
-		avg_lateness += node.scheduled_time - node.deadline
-		max_lateness = max(max_lateness, node.scheduled_time - node.deadline)
+		avg_lateness += (node.scheduled_time + node.time) - node.deadline
+		max_lateness = max(max_lateness, (node.scheduled_time + node.time) - node.deadline)
+	for node in all_nodes_gpu:
+		n_nodes += 1
+		avg_lateness += (node.scheduled_time + node.time_gpu) - node.deadline
+		max_lateness = max(max_lateness, (node.scheduled_time + node.time_gpu) - node.deadline)
 	print('avg lateness: '+str(round(float(avg_lateness/n_nodes), 2)))
 	print('max lateness: '+str(round(max_lateness, 2)))
 
