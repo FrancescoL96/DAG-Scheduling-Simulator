@@ -10,7 +10,7 @@ PROCESSORS = float(n_cpu+n_gpu)	# Used in the formula to calculate priority poin
 DEADLINE = False # If set to true it will schedule using EDD, otherwise G-FL (CPU only)
 PIPELINING = True # If set to true it will enable pipelining
 FRAMES = 3
-MAXIMUM_PIPELINING_ATTEMPTS = 10000
+MAXIMUM_PIPELINING_ATTEMPTS = 100
 MINIMUM_FRAME_DELAY = 33 # The minimum time between frames, 16ms is 60 fps, 33ms is 30 fps, 22ms is 45 fps
 
 # This two variables are for debugging purposes and refer to how many tasks have been moved due to pipelining
@@ -19,7 +19,7 @@ MOVED_GPU = 0
 """
 Structure
 	Classes 	(2)
-	Functions	(5)
+	Functions	(6)
 	Main		(1)
 """
 class Node:
@@ -129,7 +129,7 @@ class Schedule:
 							if (append and next not in available_cpu and next.scheduled_time == -1):
 								available_cpu.append(next)
 					available_gpu.remove(node)
-					node.delay = 0
+					node.delay = 0 # Once the node has been scheduled we can reset this value, as it has been considered in the scheduled time
 			# Behaves like above, but for CPU cores
 			if (available_cpu):
 				node = available_cpu[0]
@@ -139,7 +139,7 @@ class Schedule:
 					for cpu in times_cpu:
 						if min_time_cpu[0] > cpu[-1][1]:
 							min_time_cpu[0] = cpu[-1][1]
-							min_time_cpu[1] = times_cpu.index(cpu)
+							min_time_cpu[1] = times_cpu.index(cpu)							
 					execution_elements_cpu[min_time_cpu[1]].append(node)
 					node.delay = node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] if node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] > 0 else 0
 					node.scheduled_time = round(times_cpu[min_time_cpu[1]][-1][1] + node.delay, 2)
@@ -172,9 +172,8 @@ class Schedule:
 		# Super greedy approach
 		# Keeps trying until there are no more changes (or MAXIMUM_PIPELINING_ATTEMPTS is reached)
 		attempts = 0
-		# If pipelining is enabled it will try to reorganize the task with some overlap between them
+		# If pipelining is enabled it will try to reorganize the task with some overlap between them (as long as frame times are respected)
 		while (PIPELINING): # This should be a do-while
-			print(attempts)
 			old_moved_cpu = MOVED
 			old_moved_gpu = MOVED_GPU
 			self.can_any_node_be_run_earlier(execution_elements_gpu, times_gpu)
@@ -184,6 +183,9 @@ class Schedule:
 				break
 		print('Moved: '+str(MOVED))
 		print('Moved GPU: '+str(MOVED_GPU))
+		
+		print(times_gpu)
+		
 		# Trasforms the separeted lists in a sigle one: [CPU_0 list[node_a, node_b], CPU_1 list[node_c, node_d], ..., GPU_0 list[node_e, node_f], ...]
 		self.node_list = execution_elements_cpu + execution_elements_gpu
 		for ce in self.node_list:
@@ -252,7 +254,7 @@ class Schedule:
 				# We search for the first gap that can fit our node (super greedy)
 				# Also the first gap after this task has been released (meaining greater than execution*MINIMUM_FRAME_DELAY)
 				# This gap also has to satisfy requirements timings (not only release timings)
-				gap = self.get_first_time_gap(times, node.copy_time + (node.time_gpu if node.is_gpu else node.time), node.execution, node.requirements)
+				gap = self.get_first_time_gap(times, node.copy_time + (node.time_gpu if node.is_gpu else node.time), node.execution, node)
 				# If the earliest gap doesn't exist or it is after our task then we continue to the next node
 				if (not gap or gap[0] > node.scheduled_time):
 					continue
@@ -297,16 +299,34 @@ class Schedule:
 			
 	# Given the times for all the processors, searches for a gap at least the size of min_gap
 	# Returns the start of the gap, the end of the gap, the duration and the processor in which it has been found
-	def get_first_time_gap(self, times, min_gap, frame_number, node_requirements):
+	# The release time of a task is also taken into account (if the frame to compute exists or not)
+	def get_first_time_gap(self, times, min_gap, frame_number, node):
 		for processor_times in times:
 			for i in range(1, len(processor_times)):
-				if (processor_times[i][0] - processor_times[i-1][1] > min_gap and processor_times[i][0] > frame_number*MINIMUM_FRAME_DELAY ):
+				# If the gap is wide enough and it's not earlier than the task release time (which is the frame time)
+				if (processor_times[i][0] - processor_times[i-1][1] > min_gap and processor_times[i-1][1] > frame_number*MINIMUM_FRAME_DELAY ):
 					return_value = True
-					for req in node_requirements:
+					# If moving the task to this gap would make it not respect a dependency then it skips this gap for this task
+					for req in node.requirements:
 						if req.scheduled_time > processor_times[i-1][1]:
 							return_value = False
 					if (return_value):
 						return [processor_times[i-1][1], processor_times[i][0], times.index(processor_times)]
+				# If the gap is wide enough and it's earlier than the task release time there is an attempt to delay it inside the gap
+				# as long as the gap is big enough to host the task and await the start of the frame
+				elif (processor_times[i][0] - processor_times[i-1][1] > min_gap and processor_times[i-1][1] < frame_number*MINIMUM_FRAME_DELAY):
+					release_delay = frame_number*MINIMUM_FRAME_DELAY - processor_times[i-1][1]
+					new_gap = processor_times[i][0] - (processor_times[i-1][1] + release_delay)
+					print(processor_times[i][0])
+					if (processor_times[i-1][1] + release_delay < processor_times[i][0] and min_gap < new_gap):
+						if (processor_times[i-1][1] > 34.5 and processor_times[i-1][1] < 37.0):
+							print(node)
+						return_value = True
+						for req in node.requirements:
+							if req.scheduled_time > processor_times[i-1][1] + release_delay:
+								return_value = False
+						if (return_value):
+							return [processor_times[i-1][1]+release_delay, processor_times[i][0], times.index(processor_times)]
 		return []
 			
 	# This function prints the Grantt graph of the scheduled nodes
@@ -350,9 +370,9 @@ class Schedule:
 			for node in computing_element:
 				name.append(node.name[0]+'_'+str(node.level)+'_'+str(node.execution))
 				if (node.is_gpu): 
-					bar.append((node.scheduled_time, node.time_gpu))
+					bar.append((node.scheduled_time, node.time_gpu + node.copy_time))
 				else:
-					bar.append((node.scheduled_time, node.time))
+					bar.append((node.scheduled_time, node.time + node.copy_time))
 					
 				# Creating the actual color vectors
 				if ('scale' in node.name):
@@ -426,7 +446,7 @@ def normalize_deadlines(all_nodes_exec):
 		for node in all_nodes_exec:
 			node.deadline += max_queue_value * (node.execution) # There is no change in deadline or priority if its the first frame (0)
 		
-# Normalizes deadlines and calculates priority points
+# Normalizes deadlines and calculates priority points (for each execution)
 def calculate_priority_points(all_nodes):
 	for node in all_nodes:
 		if (node.is_gpu == True):
@@ -437,8 +457,12 @@ def calculate_priority_points(all_nodes):
 	min_priority_point =  min(all_nodes, key = lambda x: x.priority_point).priority_point
 	for node in all_nodes:
 		node.priority_point -= min_priority_point
-		node.priority_point *= (node.execution+1)
 		
+def prioritize_earlier_frames(all_nodes):
+	# find the maximum priority for the first execution and use it to make sure no node from a successive frame has higher priority comapred to a current node
+	max_priority = max(all_nodes, key=lambda x: x.priority_point).priority_point
+	for node in all_nodes:
+		node.priority_point += max_priority * (node.execution+1)
 def main():
 	# Dependencies should be imported from a file, for now they are hardcoded
 	levels = 8
@@ -470,7 +494,7 @@ def main():
 		# First node of each execution has special treatment due to special constraints
 		if execution > 0:
 			scale[execution].append(Node('scale', 0, timings['scale_cpu'][0], [scale[execution-1][0]], execution, timings['scale_gpu'][0]))
-			scale[execution][0].set_gpu()
+			#scale[execution][0].set_gpu()
 		# As scale_0 are set outside, we need to skip them here, where we initialize all the other nodes
 		for level in range(1, levels):
 			scale[execution].append(Node('scale', level, timings['scale_cpu'][level], [scale[execution][level-1]], execution, timings['scale_gpu'][level]))
@@ -548,6 +572,8 @@ def main():
 		calculate_priority_points(all_nodes_exec)
 		# Deep learning is GPU only and has no levels so its added outside the for cycle
 		all_nodes_gpu.append(deep_learning[execution][0])
+		# No node from the i-th frame should have higher priority than any node in the (i-1)-th node
+		prioritize_earlier_frames(all_nodes_exec)
 	
 	# All the nodes are ordered by their priority point (as G-FL demands) or deadline
 	if (DEADLINE):
