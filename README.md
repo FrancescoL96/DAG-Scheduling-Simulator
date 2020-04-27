@@ -13,7 +13,7 @@ Simulates using G-FL and 2 frames, loading from "timings.csv"
 ```
 sim.py 0 2
 ```
-Simulates using EDD and 10 frames, loading from "time.csv"
+Simulates using EDD and 10 frames, loading from "times.csv"
 ```
 sim.py times.csv 1 10
 ```

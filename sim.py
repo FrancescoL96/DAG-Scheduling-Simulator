@@ -13,7 +13,7 @@ FRAMES = 3 # Default value is 3 !!! (can be overridden with program parameters)
 MAXIMUM_PIPELINING_ATTEMPTS = 100
 MINIMUM_FRAME_DELAY = 33 # The minimum time between frames, 16ms is 60 fps, 33ms is 30 fps, 22ms is 45 fps
 # If set to True, those group of nodes will be scheduled on the GPU
-nodes_is_gpu = {'scale': True, 'fast': True, 'gauss': True, 'orb': True}
+nodes_is_gpu = {'scale': True, 'fast': True, 'gauss': True, 'orb': False}
 # If set to True it will display a graph with the scheduling
 SHOW_GRAPH = True
 """
@@ -31,11 +31,7 @@ class Node:
 		self.time_gpu = time_gpu			# If it has a GPU implementation set the time here
 		self.execution = execution			# This is a numeric value used to indicate to which graph this nodes belong to
 		self.is_gpu = False					# If this value is True then the GPU time is used
-		# If any data of a required node is on a different processor we need a copy
-		self.copy_time = copy_time
-		for req in requirements:
-			if req.is_gpu != self.is_gpu:
-				self.copy_time = copy_time
+		self.copy_time = copy_time			# Copy time between processors memories to start this node
 		# This values are set automatically
 		self.delay = 0						# How long does this node need to wait before it can start
 		self.scheduled_time = -1			# At what time is this node scheduled
@@ -51,6 +47,16 @@ class Node:
 	def set_gpu(self, value=True):
 		if (self.time_gpu != -1):
 			self.is_gpu = value
+			
+	# If any data of a required node is on a different processor we need a copy
+	def check_copy(self):
+		# The copy time is used in the code by accessing this variable, at this point it is still unknown wheter we will use this value or not, so a copy is made to restore it in case it's needed
+		keep_copy = self.copy_time
+		self.copy_time = 0
+		for req in self.requirements:
+			if req.is_gpu != self.is_gpu:
+				self.copy_time = keep_copy
+		
 	
 	# If a node cannot start right away and dependencies do not allow the node to start right away, set this value to make the node wait before it starts
 	def set_delay(self, delay):
@@ -572,7 +578,10 @@ def main():
 			
 		deep_learning[execution].append(Node('deep_learning', 0, timings['deep_learning_cpu'][0], [scale[execution][0]], execution, timings['deep_learning_gpu'][0]))
 		deep_learning[execution][0].set_gpu()
-		
+		# Once all the nodes have been created and the processor is set (with is_gpu()), the copy times are updated
+		for node in gauss[execution]+fast[execution]+orb[execution]:
+			node.check_copy()
+	
 	all_nodes_cpu = []
 	all_nodes_gpu = []
 	max_queue_value = 0 # this value is used to normalize deadlines or priorities based on the execution number
