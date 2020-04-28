@@ -13,7 +13,7 @@ FRAMES = 3 # Default value is 3 !!! (can be overridden with program parameters)
 MAXIMUM_PIPELINING_ATTEMPTS = 100
 MINIMUM_FRAME_DELAY = 33 # The minimum time between frames, 16ms is 60 fps, 33ms is 30 fps, 22ms is 45 fps
 # If set to True, those group of nodes will be scheduled on the GPU
-nodes_is_gpu = {'scale': True, 'fast': True, 'gauss': True, 'orb': False}
+nodes_is_gpu = {'scale': True, 'fast': True, 'gauss': False, 'orb': False}
 # If set to True it will display a graph with the scheduling
 SHOW_GRAPH = True
 """
@@ -111,7 +111,7 @@ class Schedule:
 		# This while takes advantage of lazy expression evaluation to avoid index out of bounds
 		while self.current_frame < FRAMES and (self.available_gpu[self.current_frame] or self.available_cpu[self.current_frame]):
 			# The processor with the earliest time goes first			
-			if ((min(times_gpu, key=lambda x: x[-1][1])[-1][1] <= min(times_cpu, key=lambda x: x[-1][1])[-1][1] and self.available_gpu[self.current_frame]) or not self.available_cpu[self.current_frame]):
+			if ((min(times_gpu, key=lambda x: x[-1][1])[-1][1]+(self.available_gpu[self.current_frame][0].time_gpu if self.available_gpu[self.current_frame] else 0) <= min(times_cpu, key=lambda x: x[-1][1])[-1][1]+(self.available_cpu[self.current_frame][0].time if self.available_cpu[self.current_frame] else 0) and self.available_gpu[self.current_frame]) or not self.available_cpu[self.current_frame]):
 				# If there are nodes available for a GPU
 				if (self.available_gpu[self.current_frame]):
 					node = self.available_gpu[self.current_frame][0]
@@ -217,8 +217,9 @@ class Schedule:
 		
 		# Calculates how much time was spent idle for all processors
 		print('Idle times before pipelining: ')
-		self.calculate_idle_time(times_cpu)
-		self.calculate_idle_time(times_gpu, is_gpu=True)
+		total_time = self.calculate_idle_time(times_cpu)
+		total_time += self.calculate_idle_time(times_gpu, is_gpu=True)
+		print('Total idle before: '+str(round(total_time, 2)))
 		
 		# Tries to move nodes as early as it can without delaying any other node (fills holes basically)
 		# Super greedy approach
@@ -233,9 +234,11 @@ class Schedule:
 				break
 		
 		# Calculates idle times again to see what kind of improvement is obtained from pipelining
-		print('Idle times after pipelining: ')
-		self.calculate_idle_time(times_cpu)
-		self.calculate_idle_time(times_gpu, is_gpu=True)
+		if (PIPELINING):
+			print('Idle times after pipelining: ')
+			total_time = self.calculate_idle_time(times_cpu)
+			total_time += self.calculate_idle_time(times_gpu, is_gpu=True)
+			print('Total idle after: '+str(round(total_time, 2)))
 		
 		# Trasforms the separeted lists in a sigle one: [CPU_0 list[node_a, node_b], CPU_1 list[node_c, node_d], ..., GPU_0 list[node_e, node_f], ...]
 		self.node_list = execution_elements_cpu + execution_elements_gpu
@@ -360,15 +363,18 @@ class Schedule:
 	
 	# This function calculates idle times for each processing unit
 	def calculate_idle_time(self, times, is_gpu=False):
+		total_time = 0
 		for processor_times in times:
 			idle_time = 0
 			for i in range(1, len(processor_times)):
 				if (processor_times[i][0] - processor_times[i-1][1]) > 0:
 					idle_time += processor_times[i][0] - processor_times[i-1][1]
+			total_time += idle_time
 			if (not is_gpu):
 				print('CPU '+str(times.index(processor_times))+': '+str(round(idle_time, 2))+' ('+str(round(idle_time/processor_times[-1][1], 3))+'%)')
 			else:
 				print('GPU '+str(times.index(processor_times))+': '+str(round(idle_time, 2))+' ('+str(round(idle_time/processor_times[-1][1], 3))+'%)')
+		return round(total_time, 2)
 				
 
 	# Given the times for all the processors, searches for a gap at least the size of min_gap
@@ -442,25 +448,27 @@ class Schedule:
 			name = []
 			color = []
 			for node in computing_element:
-				name.append(node.name[0]+'_'+str(node.level)+'_'+str(node.execution))
-				if (node.is_gpu): 
-					bar.append((node.scheduled_time, node.time_gpu + node.copy_time))
-				else:
-					bar.append((node.scheduled_time, node.time + node.copy_time))
-					
-				# Creating the actual color vectors
-				if ('scale' in node.name):
-					color.append('steelblue')
-				elif ('orb' in node.name):
-					color.append('limegreen')
-				elif ('gauss' in node.name):
-					color.append('black')
-				elif ('grid' in node.name):
-					color.append('gold')
-				elif ('fast' in node.name):
-					color.append('orange')
-				else:
-					color.append('gray')
+				if (node.execution >= 0):
+					#name.append(node.name[0]+'_'+str(node.level)+'_'+str(node.execution)+(' ('+str(node.priority_point)+')' if not node.is_gpu else ''))
+					name.append(node.name[0]+'_'+str(node.level)+'_'+str(node.execution))
+					if (node.is_gpu): 
+						bar.append((node.scheduled_time, node.time_gpu + node.copy_time))
+					else:
+						bar.append((node.scheduled_time, node.time + node.copy_time))
+						
+					# Creating the actual color vectors
+					if ('scale' in node.name):
+						color.append('steelblue')
+					elif ('orb' in node.name):
+						color.append('limegreen')
+					elif ('gauss' in node.name):
+						color.append('black')
+					elif ('grid' in node.name):
+						color.append('gold')
+					elif ('fast' in node.name):
+						color.append('orange')
+					else:
+						color.append('gray')
 			bars.append(bar)
 			names.append(name)
 			colors.append(color)
@@ -468,8 +476,8 @@ class Schedule:
 		for i in range(0, len(bars)):				
 			gnt.broken_barh(bars[i], (10*len(bars)-i*10, 6), facecolors=tuple(colors[i]), edgecolor='white')
 		# Writes the names of the nodes separetly
-		for i in range(0, len(self.node_list)):
-			for j in range(0, len(self.node_list[i])):
+		for i in range(0, len(bars)):	
+			for j in range(0, len(bars[i])):	
 					gnt.text(x=bars[i][j][0]+bars[i][j][1]/2, y=7+10*len(bars)-i*10+(j%3), s=names[i][j], ha='center', va='center', color='black',)
 		
 		mng = plt.get_current_fig_manager()
