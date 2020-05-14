@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from decimal import Decimal, ROUND_HALF_EVEN
 
-FILENAME = 'timings.csv'
+FILENAME = 'timings.csv' # File to import timings !!! (can be overridden with program parameters)
 n_cpu = 2
 n_gpu = 1
 PROCESSORS = float(n_cpu+n_gpu)	# Used in the formula to calculate priority points for G-FL
@@ -13,7 +13,7 @@ FRAMES = 3 # Default value is 3 !!! (can be overridden with program parameters)
 MAXIMUM_PIPELINING_ATTEMPTS = 100
 MINIMUM_FRAME_DELAY = 33 # The minimum time between frames, 16ms is 60 fps, 33ms is 30 fps, 22ms is 45 fps
 # If set to True, those group of nodes will be scheduled on the GPU
-nodes_is_gpu = {'scale': True, 'fast': True, 'gauss': False, 'orb': False}
+nodes_is_gpu = {'scale': True, 'fast': True, 'gauss': False, 'orb': False, 'super': False}
 # If set to True it will display a graph with the scheduling
 SHOW_GRAPH = True
 """
@@ -81,8 +81,9 @@ class Schedule:
 	def __init__(self, node_list_cpu, node_list_gpu, n_cpu, n_gpu):
 		self.node_list_cpu = node_list_cpu
 		self.node_list_gpu = node_list_gpu
-		self.verified = False
-		self.max_time = 0
+		self.verified = False # A schedule is verified if the nodes in the current schedule meet all dependencies
+		self.max_time = 0 # This is the longest time for any processor
+		self.max_time_pipelining = 0 # This value is used as a temporal value to calculate the pipelining improvement
 		self.n_cpu = n_cpu
 		self.n_gpu = n_gpu
 		# Ready queues for CPU and GPU tasks of the current frame
@@ -216,6 +217,8 @@ class Schedule:
 			self.update_frame_counter()
 		
 		# Calculates how much time was spent idle for all processors
+		self.max_time_pipelining = round(max(times_cpu+times_gpu, key=lambda x: x[-1][1])[-1][1], 2)
+		print('Makespan pre-pipelining: ' + str(self.max_time_pipelining))
 		print('Idle times before pipelining: ')
 		total_time = self.calculate_idle_time(times_cpu)
 		total_time += self.calculate_idle_time(times_gpu, is_gpu=True)
@@ -232,13 +235,15 @@ class Schedule:
 			attempts += 1
 			if ((not moved_cpu and not moved_gpu) or attempts > MAXIMUM_PIPELINING_ATTEMPTS):
 				break
-		
+
 		# Calculates idle times again to see what kind of improvement is obtained from pipelining
+		total_time_old = total_time
 		if (PIPELINING):
+			print('Makespan post-pipelining: ' + str(round(max(times_cpu+times_gpu, key=lambda x: x[-1][1])[-1][1], 2)) + ' ('+str(round((self.max_time_pipelining/round(max(times_cpu+times_gpu, key=lambda x: x[-1][1])[-1][1], 2)-1)*100, 2))+'%)')
 			print('Idle times after pipelining: ')
 			total_time = self.calculate_idle_time(times_cpu)
 			total_time += self.calculate_idle_time(times_gpu, is_gpu=True)
-			print('Total idle after: '+str(round(total_time, 2)))
+			print('Total idle after: '+str(round(total_time, 2)) + ' (-'+str(round(100.0 - total_time/total_time_old*100,2))+'%)')
 		
 		# Trasforms the separeted lists in a sigle one: [CPU_0 list[node_a, node_b], CPU_1 list[node_c, node_d], ..., GPU_0 list[node_e, node_f], ...]
 		self.node_list = execution_elements_cpu + execution_elements_gpu
@@ -371,43 +376,60 @@ class Schedule:
 					idle_time += processor_times[i][0] - processor_times[i-1][1]
 			total_time += idle_time
 			if (not is_gpu):
-				print('CPU '+str(times.index(processor_times))+': '+str(round(idle_time, 2))+' ('+str(round(idle_time/processor_times[-1][1], 3))+'%)')
+				print('CPU '+str(times.index(processor_times))+': '+str(round(idle_time, 2))+' ('+str(round(idle_time/processor_times[-1][1] * 100, 2))+'%)')
 			else:
-				print('GPU '+str(times.index(processor_times))+': '+str(round(idle_time, 2))+' ('+str(round(idle_time/processor_times[-1][1], 3))+'%)')
+				print('GPU '+str(times.index(processor_times))+': '+str(round(idle_time, 2))+' ('+str(round(idle_time/processor_times[-1][1] * 100, 2))+'%)')
 		return round(total_time, 2)
 				
 
 	# Given the times for all the processors, searches for a gap at least the size of min_gap
-	# Returns the start of the gap, the end of the gap, the duration and the processor in which it has been found
+	# Returns the start of the gap, the end of the gap and the processor in which it has been found
 	# The release time of a task is also taken into account (if the frame to compute exists or not)
 	def get_first_time_gap(self, times, min_gap, frame_number, node):
+		# max_time_pipelining is used to compute the improvement from pipelining, here we take advatange of it to know what is the maximum possible value for the earliest gap (so that our search can decrease it)
+		earliest_gap = [self.max_time_pipelining+1, self.max_time_pipelining+2, 'e'] # The e is positioned so that we know if no gap was found, it is used in the return value
 		for processor_times in times:
 			for i in range(1, len(processor_times)):
 				# If there is a gap before the current task, we can simply move it up
 				if (processor_times[i][0] - processor_times[i-1][1]) > 0 and node.scheduled_time == processor_times[i][0] and (node.scheduled_on_gpu if node.is_gpu else node.scheduled_on_cpu) == times.index(processor_times) and processor_times[i-1][1] > frame_number*MINIMUM_FRAME_DELAY:
-					return [processor_times[i-1][1], processor_times[i][1], times.index(processor_times)]
+					if (processor_times[i-1][1] < earliest_gap[0]):
+						earliest_gap = [processor_times[i-1][1], processor_times[i][1], times.index(processor_times)]
+						
 				# If the gap is wide enough and it's not earlier than the task release time (which is the frame time)
-				if (processor_times[i][0] - processor_times[i-1][1] > min_gap and processor_times[i-1][1] > frame_number*MINIMUM_FRAME_DELAY ):
+				if (processor_times[i][0] - processor_times[i-1][1] > min_gap and processor_times[i-1][1] >= frame_number*MINIMUM_FRAME_DELAY ):
 					return_value = True
 					# If moving the task to this gap would make it not respect a dependency then it skips this gap for this task
+					dependency_delay = 0.0
 					for req in node.requirements:
-						if req.scheduled_time > processor_times[i-1][1]:
+						if req.scheduled_time + (req.time_gpu if req.is_gpu else req.time) > processor_times[i-1][1]:
 							return_value = False
+							# All dependencies are explored, the worst one is saved, so that we can attempt a delay
+							if (dependency_delay < req.scheduled_time + (req.time_gpu if req.is_gpu else req.time) - processor_times[i-1][1]):
+								dependency_delay = req.scheduled_time + (req.time_gpu if req.is_gpu else req.time) - processor_times[i-1][1]
 					if (return_value):
-						return [processor_times[i-1][1], processor_times[i][0], times.index(processor_times)]
+						if (processor_times[i-1][1] < earliest_gap[0]):
+							earliest_gap = [processor_times[i-1][1], processor_times[i][0], times.index(processor_times)]
+					else:
+						# If a gap is not valid because of a dependency, a delay is added
+						new_gap = processor_times[i][0] - (processor_times[i-1][1] + dependency_delay)
+						if (processor_times[i-1][1] + dependency_delay < processor_times[i][0] and min_gap < new_gap):
+							earliest_gap = [processor_times[i-1][1] + dependency_delay, processor_times[i][0], times.index(processor_times)]
 				# If the gap is wide enough and it's earlier than the task release time there is an attempt to delay it inside the gap
 				# as long as the gap is big enough to host the task and await the start of the frame
 				elif (processor_times[i][0] - processor_times[i-1][1] > min_gap and processor_times[i-1][1] < frame_number*MINIMUM_FRAME_DELAY):
 					release_delay = frame_number*MINIMUM_FRAME_DELAY - processor_times[i-1][1]
 					new_gap = processor_times[i][0] - (processor_times[i-1][1] + release_delay)
-					if (processor_times[i-1][1] + release_delay < processor_times[i][0] and min_gap < new_gap):	
+					if (processor_times[i-1][1] + release_delay < processor_times[i][0] and min_gap < new_gap):
 						return_value = True
 						for req in node.requirements:
 							if req.scheduled_time > processor_times[i-1][1] + release_delay:
 								return_value = False
 						if (return_value):
-							return [processor_times[i-1][1]+release_delay, processor_times[i][0], times.index(processor_times)]
-		return []
+							if (processor_times[i-1][1] < earliest_gap[0]):
+								earliest_gap = [processor_times[i-1][1]+release_delay, processor_times[i][0], times.index(processor_times)]
+		if (earliest_gap[2] == 'e'):
+			return []
+		return earliest_gap
 			
 	# This function prints the Grantt graph of the scheduled nodes
 	# Supports any number of processors (more or less, zooming in and out might be required)
@@ -426,8 +448,9 @@ class Schedule:
 		grid_legend = mpatches.Patch(color='gold', label='grid')
 		fast_legend = mpatches.Patch(color='orange', label='fast')
 		dl_legend = mpatches.Patch(color='gray', label='dl')
+		super_legend = mpatches.Patch(color='red', label='Super')
 		name_legend = mpatches.Patch(color='white', label='initial_level_execution')
-		plt.legend(handles=[scale_legend, orb_legend, gauss_legend, grid_legend, fast_legend, dl_legend, name_legend])
+		plt.legend(handles=[scale_legend, orb_legend, gauss_legend, grid_legend, fast_legend, dl_legend, super_legend, name_legend])
 		
 		gnt.set_ylim(0, 50) 
 		gnt.set_xlim(0, self.max_time*1.05) 
@@ -467,6 +490,8 @@ class Schedule:
 						color.append('gold')
 					elif ('fast' in node.name):
 						color.append('orange')
+					elif ('super' in node.name):
+						color.append('red')
 					else:
 						color.append('gray')
 			bars.append(bar)
@@ -540,6 +565,7 @@ def main():
 	grid = [[] for i in range(0, FRAMES)]
 	gauss = [[] for i in range(0, FRAMES)]
 	orb = [[] for i in range(0, FRAMES)]
+	super = [[] for i in range(0, FRAMES)]
 	deep_learning = [[] for i in range(0, FRAMES)]
 	
 	# Creates all the nodes
@@ -563,6 +589,10 @@ def main():
 		if execution > 0:
 			scale[execution].append(Node('scale', 0, timings['scale_cpu'][0], [scale[execution-1][0]], execution, timings['scale_gpu'][0]))
 			scale[execution][0].set_gpu(nodes_is_gpu['scale'])
+			
+		super[execution].append(Node('super', 0, timings['super_cpu'][0], [scale[execution][0]], execution, timings['super_gpu'][0]))
+		super[execution][0].set_gpu(nodes_is_gpu['super'])
+		
 		# As scale_0 are set outside, we need to skip them here, where we initialize all the other nodes
 		for level in range(1, levels):
 			scale[execution].append(Node('scale', level, timings['scale_cpu'][level], [scale[execution][level-1]], execution, timings['scale_gpu'][level]))
@@ -574,14 +604,14 @@ def main():
 			
 			grid[execution].append(Node('grid', level, timings['grid_cpu'][level], [fast[execution][level]], execution, copy_time=timings['grid_cpu_gpu_copy'][level]))
 			
-			gauss[execution].append(Node('gauss', level, timings['gauss_cpu'][level], [scale[execution][level]], execution, timings['gauss_gpu'][level]))
+			gauss[execution].append(Node('gauss', level, timings['gauss_cpu'][level], [scale[execution][level], super[execution][0]], execution, timings['gauss_gpu'][level]))
 			gauss[execution][level].set_gpu(nodes_is_gpu['gauss'])
 			
 			if (level == 7 and execution > 0):
 				# A Frame cannot complete computing before an earlier one
-				orb[execution].append(Node('orb', level, timings['orb_cpu'][level], [gauss[execution][level], grid[execution][level], orb[execution-1][7]], execution, timings['orb_gpu'][level], copy_time=timings['orb_cpu_gpu_copy'][level]))
+				orb[execution].append(Node('orb', level, timings['orb_cpu'][level], [gauss[execution][level], grid[execution][level], orb[execution-1][7], super[execution][0]], execution, timings['orb_gpu'][level], copy_time=timings['orb_cpu_gpu_copy'][level]))
 			else:
-				orb[execution].append(Node('orb', level, timings['orb_cpu'][level], [gauss[execution][level], grid[execution][level]], execution, timings['orb_gpu'][level], copy_time=timings['orb_cpu_gpu_copy'][level]))
+				orb[execution].append(Node('orb', level, timings['orb_cpu'][level], [gauss[execution][level], grid[execution][level], super[execution][0]], execution, timings['orb_gpu'][level], copy_time=timings['orb_cpu_gpu_copy'][level]))
 			orb[execution][level].set_gpu(nodes_is_gpu['orb'])
 			
 		deep_learning[execution].append(Node('deep_learning', 0, timings['deep_learning_cpu'][0], [scale[execution][0]], execution, timings['deep_learning_gpu'][0]))
@@ -600,6 +630,7 @@ def main():
 
 		EDD_auto([scale[execution][0]]) # Creates deadlines
 		all_nodes_exec = [deep_learning[execution][0]]
+		all_nodes_exec.append(super[execution][0])
 		for i in range(0, levels):
 			# These are the nodes for the execution under exam
 			all_nodes_exec.append(scale[execution][i])
@@ -635,7 +666,11 @@ def main():
 			else:
 				all_nodes_cpu.append(orb[execution][i])
 
-		
+		if super[execution][0].is_gpu:
+			all_nodes_gpu.append(super[execution][0])
+		else:
+			all_nodes_cpu.append(super[execution][0])
+				
 		normalize_deadlines(all_nodes_exec)
 		calculate_priority_points(all_nodes_exec)
 		# Deep learning is GPU only and has no levels so its added outside the for cycle
@@ -685,7 +720,7 @@ def main():
 		sum_frame_times += max_time[i]-min_time[i]
 		print(round(max_time[i]-min_time[i], 2), end=' ')	
 	print('\nAverage frame time: '+str(round(sum_frame_times/FRAMES, 2)))
-		
+
 	if (SHOW_GRAPH):
 		GFL.create_bar_graph(labels=GPU_labels + CPU_labels)
 
