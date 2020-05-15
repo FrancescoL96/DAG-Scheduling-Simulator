@@ -23,10 +23,10 @@ Structure
 	Main		(1)
 """
 class Node:
-	def __init__(self, name, level, time, requirements, execution, time_gpu = -1, copy_time = 0):
+	def __init__(self, name, level, time_cpu, requirements, execution, time_gpu = -1, copy_time = 0):
 		self.name = name					# Name of the node that needs to scheduled
 		self.level = level					# Level of the node (0 to 7)
-		self.time = time					# Runtime
+		self.time_cpu = time_cpu			# Runtime
 		self.requirements = requirements	# List of nodes which this node depends on
 		self.time_gpu = time_gpu			# If it has a GPU implementation set the time here
 		self.execution = execution			# This is a numeric value used to indicate to which graph this nodes belong to
@@ -47,6 +47,10 @@ class Node:
 	def set_gpu(self, value=True):
 		if (self.time_gpu != -1):
 			self.is_gpu = value
+	
+	# Returns the computation time required by this node, taking into account if the node is run on CPU or GPU
+	def time(self):
+		return self.time_gpu if self.is_gpu else self.time_cpu
 			
 	# If any data of a required node is on a different processor we need a copy
 	def check_copy(self):
@@ -56,17 +60,11 @@ class Node:
 		for req in self.requirements:
 			if req.is_gpu != self.is_gpu:
 				self.copy_time = keep_copy
-		
-	
-	# If a node cannot start right away and dependencies do not allow the node to start right away, set this value to make the node wait before it starts
-	def set_delay(self, delay):
-		if (delay >= 0):
-			self.delay = delay
 	
 	# Overrides the string function, printing the node name
 	# Or other stuff actually, just print what you need :)
 	def __str__(self):
-		cpu_time = '\nfinishes at (cpu): ' + str(round(self.scheduled_time + self.time, 2))
+		cpu_time = '\nfinishes at (cpu): ' + str(round(self.scheduled_time + self.time_cpu, 2))
 		gpu_time = '\nfinishes at (gpu): ' + str(round(self.scheduled_time + self.time_gpu, 2))
 		concat = gpu_time if (self.is_gpu == True) else cpu_time
 		later = '\nis scheduled at time: '+str(round(self.scheduled_time, 2)) + concat + '\nPriority: ' + str(round(self.priority_point, 2)) + ' Deadline: '+str(round(self.deadline, 2))
@@ -112,7 +110,7 @@ class Schedule:
 		# This while takes advantage of lazy expression evaluation to avoid index out of bounds
 		while self.current_frame < FRAMES and (self.available_gpu[self.current_frame] or self.available_cpu[self.current_frame]):
 			# The processor with the earliest time goes first			
-			if ((min(times_gpu, key=lambda x: x[-1][1])[-1][1]+(self.available_gpu[self.current_frame][0].time_gpu if self.available_gpu[self.current_frame] else 0) <= min(times_cpu, key=lambda x: x[-1][1])[-1][1]+(self.available_cpu[self.current_frame][0].time if self.available_cpu[self.current_frame] else 0) and self.available_gpu[self.current_frame]) or not self.available_cpu[self.current_frame]):
+			if ((min(times_gpu, key=lambda x: x[-1][1])[-1][1]+(self.available_gpu[self.current_frame][0].time_gpu if self.available_gpu[self.current_frame] else 0) <= min(times_cpu, key=lambda x: x[-1][1])[-1][1]+(self.available_cpu[self.current_frame][0].time_cpu if self.available_cpu[self.current_frame] else 0) and self.available_gpu[self.current_frame]) or not self.available_cpu[self.current_frame]):
 				# If there are nodes available for a GPU
 				if (self.available_gpu[self.current_frame]):
 					node = self.available_gpu[self.current_frame][0]
@@ -190,7 +188,7 @@ class Schedule:
 						execution_elements_cpu[min_time_cpu[1]].append(node)
 						node.delay = node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] if node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] > 0 else 0
 						node.scheduled_time = round(times_cpu[min_time_cpu[1]][-1][1] + node.delay, 2)
-						times_cpu[min_time_cpu[1]].append((round(node.scheduled_time, 2), round(node.scheduled_time + node.time + node.copy_time, 2)))
+						times_cpu[min_time_cpu[1]].append((round(node.scheduled_time, 2), round(node.scheduled_time + node.time_cpu + node.copy_time, 2)))
 						node.scheduled_on_cpu = min_time_cpu[1]
 						for next in node.required_by:
 							append = True
@@ -223,6 +221,7 @@ class Schedule:
 		total_time = self.calculate_idle_time(times_cpu)
 		total_time += self.calculate_idle_time(times_gpu, is_gpu=True)
 		print('Total idle before: '+str(round(total_time, 2)))
+		print('---')
 		
 		# Tries to move nodes as early as it can without delaying any other node (fills holes basically)
 		# Super greedy approach
@@ -244,6 +243,7 @@ class Schedule:
 			total_time = self.calculate_idle_time(times_cpu)
 			total_time += self.calculate_idle_time(times_gpu, is_gpu=True)
 			print('Total idle after: '+str(round(total_time, 2)) + ' (-'+str(round(100.0 - total_time/total_time_old*100,2))+'%)')
+			print('---')
 		
 		# Trasforms the separeted lists in a sigle one: [CPU_0 list[node_a, node_b], CPU_1 list[node_c, node_d], ..., GPU_0 list[node_e, node_f], ...]
 		self.node_list = execution_elements_cpu + execution_elements_gpu
@@ -270,7 +270,7 @@ class Schedule:
 							self.error_function(node, required, node_scheduled_time, self.node_list.index(computing_element))
 							
 					else:
-						required_cpu_time = Decimal(required.scheduled_time + required.time).quantize(Decimal('.01'), rounding=ROUND_HALF_EVEN)
+						required_cpu_time = Decimal(required.scheduled_time + required.time_cpu).quantize(Decimal('.01'), rounding=ROUND_HALF_EVEN)
 						if (node_scheduled_time.compare(required_cpu_time) == -1):
 							self.error_function(node, required, node_scheduled_time, self.node_list.index(computing_element))
 		self.verified = True
@@ -307,7 +307,7 @@ class Schedule:
 			if req.scheduled_time == -1:
 				return -1
 		# the minimum time possible for this node is the maximum time (scheduled + runtime) obtained from all its dependencies, if this node has no requirements then it can start at time 0
-		node.scheduled_time = round(max((req.scheduled_time + req.copy_time + (req.time_gpu if req.is_gpu else req.time) for req in node.requirements)) if node.requirements else 0, 2)
+		node.scheduled_time = round(max((req.scheduled_time + req.copy_time + req.time() for req in node.requirements)) if node.requirements else 0, 2)
 		# If requirements are met (or there are none), it is still needed to check if this task has been released (under the assumption that there is a new frame every MINIMUM_FRAME_DELAY, if we are before this deadline, the task is delayed
 		if node.scheduled_time < node.execution * MINIMUM_FRAME_DELAY:
 			node.scheduled_time = node.execution * MINIMUM_FRAME_DELAY
@@ -322,19 +322,19 @@ class Schedule:
 				# We search for the first gap that can fit our node (super greedy)
 				# Also the first gap after this task has been released (meaining greater than execution*MINIMUM_FRAME_DELAY)
 				# This gap also has to satisfy requirements timings (not only release timings)
-				gap = self.get_first_time_gap(times, node.copy_time + (node.time_gpu if node.is_gpu else node.time), node.execution, node)
+				gap = self.get_first_time_gap(times, node.copy_time + node.time(), node.execution, node)
 				# If the earliest gap doesn't exist or it is after our task then we continue to the next node
 				if (not gap or gap[0] > node.scheduled_time):
 					continue
 				are_requirements_met = True
 				# All requirements are checked again
 				for req in node.requirements:
-					if gap[0] < req.scheduled_time + req.copy_time + (req.time_gpu if req.is_gpu else req.time):
+					if gap[0] < req.scheduled_time + req.copy_time + req.time():
 						# If a requirement is not met, an attempt for a delay is made
-						attempt_delay = req.scheduled_time + req.copy_time + (req.time_gpu if req.is_gpu else req.time) - gap[0]
+						attempt_delay = req.scheduled_time + req.copy_time + req.time() - gap[0]
 						# We then check if this delay moves our task outside of the free slice of time
 						# and also we check if this delay causes our task to move to a time after it is already scheduled
-						if (gap[0] + attempt_delay > gap[1] or gap[0] + attempt_delay + node.copy_time + (node.time_gpu if node.is_gpu else node.time) > node.scheduled_time or gap[0] + attempt_delay - gap[1] < node.copy_time + (node.time_gpu if node.is_gpu else node.time)):
+						if (gap[0] + attempt_delay > gap[1] or gap[0] + attempt_delay + node.copy_time + node.time() > node.scheduled_time or gap[0] + attempt_delay - gap[1] < node.copy_time + node.time()):
 							are_requirements_met = False
 						else:
 							# If not the delay improves the situation while still staying inside the free time gap
@@ -347,11 +347,11 @@ class Schedule:
 					# The node is removed from the processor where it is scheduled
 					processor.remove(node)
 					# The nodes is also removed from the timings table
-					times[node.scheduled_on_gpu if node.is_gpu else node.scheduled_on_cpu].remove((round(node.scheduled_time, 2), round(node.scheduled_time + node.copy_time + (node.time_gpu if node.is_gpu else node.time), 2)))
+					times[node.scheduled_on_gpu if node.is_gpu else node.scheduled_on_cpu].remove((round(node.scheduled_time, 2), round(node.scheduled_time + node.copy_time + node.time(), 2)))
 					# The node is added to the new processor
 					execution_elements[gap[2]].append(node)
 					# We add the node times and the delay to the timings list
-					times[gap[2]].append((round(new_start_time, 2), round(new_start_time + node.copy_time + (node.time_gpu if node.is_gpu else node.time), 2)))
+					times[gap[2]].append((round(new_start_time, 2), round(new_start_time + node.copy_time + node.time(), 2)))
 					# The node is updated with the new start time
 					node.scheduled_time = round(new_start_time, 2)
 					# The node is also updated with the processor that is running it
@@ -372,7 +372,7 @@ class Schedule:
 		for processor_times in times:
 			idle_time = 0
 			for i in range(1, len(processor_times)):
-				if (processor_times[i][0] - processor_times[i-1][1]) > 0:
+				if (processor_times[i][0] - processor_times[i-1][1]) > 0.0:
 					idle_time += processor_times[i][0] - processor_times[i-1][1]
 			total_time += idle_time
 			if (not is_gpu):
@@ -401,11 +401,11 @@ class Schedule:
 					# If moving the task to this gap would make it not respect a dependency then it skips this gap for this task
 					dependency_delay = 0.0
 					for req in node.requirements:
-						if req.scheduled_time + (req.time_gpu if req.is_gpu else req.time) > processor_times[i-1][1]:
+						if req.scheduled_time + req.time() > processor_times[i-1][1]:
 							return_value = False
 							# All dependencies are explored, the worst one is saved, so that we can attempt a delay
-							if (dependency_delay < req.scheduled_time + (req.time_gpu if req.is_gpu else req.time) - processor_times[i-1][1]):
-								dependency_delay = req.scheduled_time + (req.time_gpu if req.is_gpu else req.time) - processor_times[i-1][1]
+							if (dependency_delay < req.scheduled_time + req.time() - processor_times[i-1][1]):
+								dependency_delay = req.scheduled_time + req.time() - processor_times[i-1][1]
 					if (return_value):
 						if (processor_times[i-1][1] < earliest_gap[0]):
 							earliest_gap = [processor_times[i-1][1], processor_times[i][0], times.index(processor_times)]
@@ -474,10 +474,7 @@ class Schedule:
 				if (node.execution >= 0):
 					#name.append(node.name[0]+'_'+str(node.level)+'_'+str(node.execution)+(' ('+str(node.priority_point)+')' if not node.is_gpu else ''))
 					name.append(node.name[0]+'_'+str(node.level)+'_'+str(node.execution))
-					if (node.is_gpu): 
-						bar.append((node.scheduled_time, node.time_gpu + node.copy_time))
-					else:
-						bar.append((node.scheduled_time, node.time + node.copy_time))
+					bar.append((node.scheduled_time, node.time() + node.copy_time))
 						
 					# Creating the actual color vectors
 					if ('scale' in node.name):
@@ -534,10 +531,7 @@ def EDD_auto_rec(leaf, visited):
 		for next in leaf.required_by:
 			visited.append(leaf) if leaf not in visited else None
 			EDD_auto_rec(next, visited)
-			if (next.is_gpu == True):
-				deadline_candidates.append((next.deadline - next.time_gpu - next.copy_time))
-			else:
-				deadline_candidates.append((next.deadline - next.time - next.copy_time))
+			deadline_candidates.append(next.deadline - next.time() - next.copy_time)
 		leaf.deadline = round(min(leaf.deadline, min(deadline_candidates)), 2)
 		
 # Normalizes priorities by summing the lowest value (as they are all negativs)
@@ -551,10 +545,7 @@ def normalize_deadlines(all_nodes_exec):
 # calculates priority points
 def calculate_priority_points(all_nodes):
 	for node in all_nodes:
-		if (node.is_gpu == True):
-			node.priority_point = round(float(node.deadline - ((PROCESSORS - 1)/PROCESSORS)*node.time_gpu), 2)
-		else:
-			node.priority_point = round(float(node.deadline - ((PROCESSORS - 1)/PROCESSORS)*node.time), 2)
+		node.priority_point = round(float(node.deadline - ((PROCESSORS - 1)/PROCESSORS)*node.time()), 2)
 
 def main():
 	# Dependencies should be imported from a file, for now they are hardcoded
@@ -699,12 +690,13 @@ def main():
 	max_lateness = 0
 	avg_lateness = 0
 	for node in all_nodes_cpu+all_nodes_gpu:
-		lateness = node.scheduled_time + (node.time_gpu if node.is_gpu else node.time) + node.copy_time - (node.deadline + MINIMUM_FRAME_DELAY * node.execution)
+		lateness = node.scheduled_time + node.time() + node.copy_time - (node.deadline + MINIMUM_FRAME_DELAY * node.execution)
 		avg_lateness += lateness
 		max_lateness = max(max_lateness, lateness)
 	
 	print('Average lateness: '+str(round(float(avg_lateness/len(all_nodes_cpu+all_nodes_gpu)), 2)))
 	print('Maximum lateness: '+str(round(max_lateness, 2)))
+	print('---')
 	
 	# To calculate frame times, for each frame, we take the first task that starts execution and the last to complete and then the difference is taken as frame time
 	min_time = [10000 for i in range(0, FRAMES)]
@@ -713,7 +705,7 @@ def main():
 		for execution in range(0, FRAMES):
 			if node.execution == execution:
 				min_time[execution] = round(min(min_time[execution], node.scheduled_time), 2)
-				max_time[execution] = round(max(max_time[execution], node.scheduled_time+node.copy_time+(node.time_gpu if node.is_gpu else node.time)), 2)
+				max_time[execution] = round(max(max_time[execution], node.scheduled_time+node.copy_time+node.time()), 2)
 	print('Exact frame times: ')
 	sum_frame_times = 0
 	for i in range(0, FRAMES):
