@@ -17,7 +17,7 @@ MINIMUM_FRAME_DELAY = 33 # The minimum time between frames, 16ms is 60 fps, 33ms
 # If set to True, those group of nodes will be scheduled on the GPU
 nodes_is_gpu = {'scale': True, 'fast': True, 'gauss': False, 'orb': False, 'super': False}
 # If set to True it will display a graph with the scheduling
-SHOW_GRAPH = True
+SHOW_GRAPH = False
 """
 Structure
 	Classes 	(2)
@@ -253,13 +253,14 @@ class Schedule:
 			self.set_minimum_start_time(node)
 			
 			# We take the last run required node that was run on the same processor
-			required = None
-			if node.requirements:
-				required = node.requirements[0]
-				for req in node.requirements:
-					if not req.is_gpu and not node.is_gpu:
-						if req.scheduled_time > required.scheduled_time:
-							required = req
+			required_cpu = None
+			required_gpu = None
+			for req in node.requirements:
+				if (required_gpu == None and req.is_gpu) or (req.is_gpu and req.scheduled_time > required_gpu.scheduled_time):
+					required_gpu = req
+				elif (required_cpu == None and not req.is_gpu) or (not req.is_gpu and req.scheduled_time > required_cpu.scheduled_time):
+					required_cpu = req
+
 			# If the selected node has a minimum start time set by "set_minimum_start_time" we continue (it should always be set, it is still checked)
 			if (node.scheduled_time != -1):
 				min_time_cpu = [50000, -1]
@@ -285,9 +286,9 @@ class Schedule:
 					node.delay = 0
 					node.set_gpu(True)
 					# We check if the last run node is one of this node's dependencies, if we were going to wait to run this node waiting on that dependency and we are currently planning on running this node on a different CPU, it gets moved if possible
-					if required != None and node.scheduled_time == required.scheduled_time + required.time() and node.scheduled_on_gpu != required.scheduled_on_gpu:
-						if times_gpu[required.scheduled_on_gpu][-1][0] == required.scheduled_time:
-							node.scheduled_on_gpu = required.scheduled_on_gpu
+					if required_gpu != None and node.scheduled_time == required_gpu.scheduled_time + required_gpu.time() and node.scheduled_on_gpu != required_gpu.scheduled_on_gpu:
+						if times_gpu[required_gpu.scheduled_on_gpu][-1][0] == required_gpu.scheduled_time:
+							node.scheduled_on_gpu = required_gpu.scheduled_on_gpu
 					# All dependencies are scheduled and we know where we will run this node, we can check if we need to add copy times or not
 					node.check_copy()
 					# Scheduled node list times are updated with the new node times
@@ -301,9 +302,9 @@ class Schedule:
 					node.scheduled_on_cpu = min_time_cpu[1]
 					node.delay = 0
 					node.set_gpu(False)
-					if required != None and node.scheduled_time == required.scheduled_time + required.time() and node.scheduled_on_cpu != required.scheduled_on_cpu:
-						if times_cpu[required.scheduled_on_cpu][-1][0] == required.scheduled_time:
-							node.scheduled_on_cpu = required.scheduled_on_cpu
+					if required_cpu != None and node.scheduled_time == required_cpu.scheduled_time + required_cpu.time() and node.scheduled_on_cpu != required_cpu.scheduled_on_cpu:
+						if times_cpu[required_cpu.scheduled_on_cpu][-1][0] == required_cpu.scheduled_time:
+							node.scheduled_on_cpu = required_cpu.scheduled_on_cpu
 					node.check_copy()
 					times_cpu[node.scheduled_on_cpu].append((round(node.scheduled_time, 2), round(node.scheduled_time + node.time() + node.copy_time, 2)))
 					execution_elements_cpu[node.scheduled_on_cpu].append(node)
@@ -441,17 +442,17 @@ class Schedule:
 				# This gap also has to satisfy requirements timings (not only release timings)
 				gap = self.get_first_time_gap(times, node.copy_time + node.time(), node.execution, node)
 				# If the earliest gap doesn't exist or it is after our task then we continue to the next node
-				if (not gap or gap[0] > node.scheduled_time):
+				if (not gap or gap[0] >= node.scheduled_time):
 					continue
 				are_requirements_met = True
 				# All requirements are checked again
 				for req in node.requirements:
 					if gap[0] < req.scheduled_time + req.copy_time + req.time():
 						# If a requirement is not met, an attempt for a delay is made
-						attempt_delay = req.scheduled_time + req.copy_time + req.time() - gap[0]
+						attempt_delay = round(req.scheduled_time + req.copy_time + req.time() - gap[0], 2)
 						# We then check if this delay moves our task outside of the free slice of time
 						# and also we check if this delay causes our task to move to a time after it is already scheduled
-						if (gap[0] + attempt_delay > gap[1] or gap[0] + attempt_delay + node.copy_time + node.time() > node.scheduled_time or gap[0] + attempt_delay - gap[1] < node.copy_time + node.time()):
+						if (gap[0] + attempt_delay > gap[1] or gap[0] + attempt_delay >= node.scheduled_time or gap[1] - attempt_delay - gap[0] < node.copy_time + node.time()):
 							are_requirements_met = False
 						else:
 							# If not the delay improves the situation while still staying inside the free time gap
@@ -513,7 +514,7 @@ class Schedule:
 						earliest_gap = [processor_times[i-1][1], processor_times[i][1], times.index(processor_times)]
 						
 				# If the gap is wide enough and it's not earlier than the task release time (which is the frame time)
-				if (processor_times[i][0] - processor_times[i-1][1] > min_gap and processor_times[i-1][1] >= frame_number*MINIMUM_FRAME_DELAY ):
+				elif (processor_times[i][0] - processor_times[i-1][1] > min_gap and processor_times[i-1][1] >= frame_number*MINIMUM_FRAME_DELAY ):
 					return_value = True
 					# If moving the task to this gap would make it not respect a dependency then it skips this gap for this task
 					dependency_delay = 0.0
@@ -531,6 +532,7 @@ class Schedule:
 						new_gap = processor_times[i][0] - (processor_times[i-1][1] + dependency_delay)
 						if (processor_times[i-1][1] + dependency_delay < processor_times[i][0] and min_gap < new_gap):
 							earliest_gap = [processor_times[i-1][1] + dependency_delay, processor_times[i][0], times.index(processor_times)]
+			
 				# If the gap is wide enough and it's earlier than the task release time there is an attempt to delay it inside the gap
 				# as long as the gap is big enough to host the task and await the start of the frame
 				elif (processor_times[i][0] - processor_times[i-1][1] > min_gap and processor_times[i-1][1] < frame_number*MINIMUM_FRAME_DELAY):
@@ -841,7 +843,7 @@ def main():
 	print(max_time)
 
 	GPU_labels = ['GPU '+str(i) for i in range(0, n_gpu)]
-	CPU_labels = ['CPU '+str(i) for i in range(0, n_cpu)]
+	CPU_labels = ['CPU '+str(i) for i in range(n_cpu-1, -1, -1)]
 	
 	if (not HEFT):
 		all_nodes = all_nodes_cpu + all_nodes_gpu
