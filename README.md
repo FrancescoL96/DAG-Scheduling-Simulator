@@ -1,7 +1,7 @@
 # DAG Scheduling Simulator
-This python script simulates the allocation of the nodes of the orb slam tracking on any number of CPUs and GPUs using either EDD or G-FL scheduling.
+This python script simulates the allocation of the nodes of the orb slam tracking on any number of CPUs and GPUs using G-FL(0), EDD(1) or HEFT(2) scheduling.
 
-Usage: sim.py FILENAME[csv] DEADLINE(0,1) FRAMES(n)
+Usage: sim.py FILENAME[csv] SCHEDULER(0,1,2) FRAMES(n)
 
 Examples:
 
