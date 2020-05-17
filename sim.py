@@ -6,7 +6,7 @@ from decimal import Decimal, ROUND_HALF_EVEN
 FILENAME = 'timings.csv' # File to import timings 									!!! (can be overridden with program parameters)
 n_cpu = 2
 n_gpu = 1
-PROCESSORS = float(n_cpu+n_gpu)	# Used in the formula to calculate priority points for G-FL
+PROCESSORS = float(n_cpu+n_gpu)	# Used in the formula to calculate priority points for G-FL and for XEFT
 DEADLINE = False # If set to true it will schedule using EDD 						!!! (can be overridden with program parameters)
 GFL = False # If set to true it will schedule using G-FL (CPU only) 				!!! (can be overridden with program parameters)
 HEFT = False # If set to true it will schedule using HEFT 							!!! (can be overridden with program parameters)
@@ -62,7 +62,6 @@ class Node:
 			return self.time_cpu
 		else:
 			return self.time_gpu
-			
 			
 	# If any data of a required node is on a different processor we need a copy
 	def check_copy(self):
@@ -149,6 +148,27 @@ class Schedule:
 								if min_time_gpu[0] > gpu[-1][1]:
 									min_time_gpu[0] = gpu[-1][1]
 									min_time_gpu[1] = times_gpu.index(gpu)
+						
+						# If this node has to wait before it can start, we try a different node that maybe doesn't have to wait, without delaying this one
+						if node.scheduled_time - (times_gpu[min_time_gpu[1]][-1][1] if node.scheduled_time - times_gpu[min_time_gpu[1]][-1][1] > 0 else 0) > 0:
+							# We skip the first node, as we already considered it
+							for i in range(1, len(self.available_gpu[self.current_frame])):
+								# We take one of the available to run nodes
+								attempt_early_start_node = self.available_gpu[self.current_frame][i]
+								# We check if it can start (it should be able to, as it is in the ready queue, all dependencies should be already scheduled)
+								self.set_minimum_start_time(attempt_early_start_node)
+								# We calculate how long it would have to wait in the current situation before it can run (even if all dependencies have been scheduled, they may have not finished running)
+								delay_early_node = attempt_early_start_node.scheduled_time - times_gpu[min_time_gpu[1]][-1][1] if attempt_early_start_node.scheduled_time - times_gpu[min_time_gpu[1]][-1][1] > 0 else 0
+								# We check if running this node before the highest priority one would delay it, if not, we run this node
+								if times_gpu[min_time_gpu[1]][-1][1] + delay_early_node + attempt_early_start_node.time_gpu + attempt_early_start_node.copy_time < node.scheduled_time:
+									# This node is not currently scheduled so its time is reset
+									node.scheduled_time = -1
+									# The new node to schedule is this new one, that doesn't delay the current one
+									node = attempt_early_start_node
+									break
+								else:
+									# If it does delay, we reset the time and keep searching
+									attempt_early_start_node.scheduled_time = -1
 					
 						execution_elements_gpu[min_time_gpu[1]].append(node)
 						# If the current time is less than the minimum time for this specific node, a delay is added to make sure all dependencies are met
@@ -196,6 +216,21 @@ class Schedule:
 								if min_time_cpu[0] > cpu[-1][1]:
 									min_time_cpu[0] = cpu[-1][1]
 									min_time_cpu[1] = times_cpu.index(cpu)
+									
+						# For fake Pipelining improvements, remove from here ->
+						if node.scheduled_time - (times_cpu[min_time_cpu[1]][-1][1] if node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] > 0 else 0) > 0:
+							for i in range(1, len(self.available_cpu[self.current_frame])):
+								attempt_early_start_node = self.available_cpu[self.current_frame][i]
+								self.set_minimum_start_time(attempt_early_start_node)
+								delay_early_node = attempt_early_start_node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] if attempt_early_start_node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] > 0 else 0
+								if times_cpu[min_time_cpu[1]][-1][1] + delay_early_node + attempt_early_start_node.time_cpu + attempt_early_start_node.copy_time < node.scheduled_time:
+									node.scheduled_time = -1
+									node = attempt_early_start_node
+									break
+								else:
+									attempt_early_start_node.scheduled_time = -1
+						# <- to here
+
 						execution_elements_cpu[min_time_cpu[1]].append(node)
 						node.delay = node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] if node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] > 0 else 0
 						node.scheduled_time = round(times_cpu[min_time_cpu[1]][-1][1] + node.delay, 2)
@@ -214,6 +249,7 @@ class Schedule:
 									self.available_cpu[next.execution].append(next)
 						self.available_cpu[self.current_frame].remove(node)
 						node.delay = 0
+						
 			# The two queues are sorted using EDD and G-FL (cpu only)
 			# It is not needed to sort them by execution, as it is a stable sort
 			if (DEADLINE):
@@ -224,7 +260,6 @@ class Schedule:
 				self.available_gpu[self.current_frame].sort(key=lambda x: x.deadline, reverse=False)
 			
 			self.update_frame_counter()
-		
 		self.pipeline(execution_elements_cpu, execution_elements_gpu, times_cpu, times_gpu)
 		
 		# Trasforms the separeted lists in a sigle one: [CPU_0 list[node_a, node_b], CPU_1 list[node_c, node_d], ..., GPU_0 list[node_e, node_f], ...]
@@ -426,6 +461,7 @@ class Schedule:
 				return -1
 		# the minimum time possible for this node is the maximum time (scheduled + runtime) obtained from all its dependencies, if this node has no requirements then it can start at time 0
 		node.scheduled_time = round(max((req.scheduled_time + req.copy_time + req.time() for req in node.requirements)) if node.requirements else 0, 2)
+
 		# If requirements are met (or there are none), it is still needed to check if this task has been released (under the assumption that there is a new frame every MINIMUM_FRAME_DELAY, if we are before this deadline, the task is delayed
 		if node.scheduled_time < node.execution * MINIMUM_FRAME_DELAY:
 			node.scheduled_time = node.execution * MINIMUM_FRAME_DELAY
@@ -679,7 +715,7 @@ def HEFT_auto_rec(leaf, visited):
 			visited.append(leaf) if leaf not in visited else None
 			HEFT_auto_rec(next, visited)
 			rank_candidates.append(next.copy_time + next.heft_rank)
-		leaf.heft_rank = round(max(leaf.heft_rank, leaf.avg_time() + max(rank_candidates)), 2)
+		leaf.heft_rank = round(max(leaf.heft_rank, leaf.avg_time() + max(rank_candidates)), 2)	
 
 def main():
 	# Dependencies should be imported from a file, for now they are hardcoded
@@ -874,7 +910,7 @@ def main():
 		sum_frame_times += max_time[i]-min_time[i]
 		print(round(max_time[i]-min_time[i], 2), end=' ')	
 	print('\nAverage frame time: '+str(round(sum_frame_times/FRAMES, 2)))
-
+	
 	if (SHOW_GRAPH):
 		scheduler.create_bar_graph(labels=GPU_labels + CPU_labels)
 
