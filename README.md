@@ -1,19 +1,19 @@
 # DAG Scheduling Simulator
 This python script simulates the allocation of the nodes of the orb slam tracking on any number of CPUs and GPUs using G-FL(0), EDD(1) or HEFT(2) scheduling.
 
-Usage: sim.py FILENAME[csv] SCHEDULER(0,1,2) FRAMES(n)
+Usage: sim.py FILENAME[csv] SCHEDULER(0,1,2) FRAMES(n) PIPELINE(0,1)
 
 Examples:
 
-Simulates using G-FL and 3 frames, loading from "timings.csv" (Default settings)
+Simulates using G-FL , 3 frames and no pipeline, loading from "timings.csv" (Default settings)
 ```
 sim.py
 ```
-Simulates using G-FL and 2 frames, loading from "timings.csv"
+Simulates using EDD and 2 frames, loading from "timings.csv", using the pipeline
 ```
-sim.py 0 2
+sim.py 1 2 1
 ```
-Simulates using EDD and 10 frames, loading from "times.csv"
+Simulates using HEFT, 10 frames and pipeline, loading from "times.csv"
 ```
-sim.py times.csv 1 10
+sim.py times.csv 2 10 1
 ```
