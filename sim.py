@@ -13,11 +13,12 @@ HEFT = False # If set to true it will schedule using HEFT 							!!! (can be ove
 PIPELINING = False # If set to true it will enable pipelining						!!! (can be overridden with program parameters)
 FRAMES = 3 # Default value is 3 													!!! (can be overridden with program parameters)
 MAXIMUM_PIPELINING_ATTEMPTS = 100
-MINIMUM_FRAME_DELAY = 33 # The minimum time between frames, 16ms is 60 fps, 33ms is 30 fps, 22ms is 45 fps
+MINIMUM_FRAME_DELAY = 33.33 # The minimum time between frames, 16ms is 60 fps, 33ms is 30 fps, 22ms is 45 fps
 # If set to True, those group of nodes will be scheduled on the GPU
-nodes_is_gpu = {'scale': False, 'fast': True, 'gauss': True, 'orb': True, 'super': False}
+#nodes_is_gpu = {'scale': False, 'fast': True, 'gauss': True, 'orb': True, 'super': False}
+nodes_is_gpu = {'scale': True, 'fast': True, 'gauss': True, 'orb': False, 'super': False}
 # If set to True it will display a graph with the scheduling
-SHOW_GRAPH = False
+SHOW_GRAPH = True
 """
 Structure
 	Classes 	(2)
@@ -633,17 +634,22 @@ class Schedule:
 		dl_legend = mpatches.Patch(color='gray', label='dl')
 		super_legend = mpatches.Patch(color='red', label='Super')
 		name_legend = mpatches.Patch(color='white', label='initial_level_execution')
-		plt.legend(handles=[scale_legend, orb_legend, gauss_legend, grid_legend, fast_legend, dl_legend, super_legend, name_legend])
+		
+		frame_lines, = plt.Line2D([0], [0], linestyle='-.', color='gray', alpha=0.5, lw=1, label='Frame times'),
+		finish_line, = plt.plot([self.max_time, self.max_time], [0,100], color='black', alpha=0.7, label='Finish time', linewidth=1)
+		
+		plt.legend(handles=[scale_legend, orb_legend, gauss_legend, grid_legend, fast_legend, dl_legend, super_legend, frame_lines, finish_line, name_legend], ncol=2)
 		
 		gnt.set_ylim(0, 50) 
 		gnt.set_xlim(0, self.max_time*1.05) 
-		gnt.set_xlabel('seconds since start') 
+		gnt.set_xlabel('Milliseconds since start') 
 		gnt.set_ylabel('Processor')
 
 		gnt.set_yticks([15+i*10 for i in range(0, len(labels))])
 		gnt.set_yticklabels(labels) 
 		
-		gnt.grid(True) 
+		gnt.yaxis.grid(True)
+		
 		bars = []
 		colors = []
 		names = []
@@ -684,10 +690,13 @@ class Schedule:
 		for i in range(0, len(bars)):	
 			for j in range(0, len(bars[i])):
 				gnt.text(x=bars[i][j][0]+bars[i][j][1]/2, y=7+10*len(bars)-i*10+(j%3), s=names[i][j], ha='center', va='center', color='black',)
+		# Adds the frame times line (skips frame zero, as that's the start of the graph)
+		for i in range(1, FRAMES):
+			plt.plot([i*MINIMUM_FRAME_DELAY,i*MINIMUM_FRAME_DELAY], [0,100], '-.', color='gray', alpha=0.5)
 		
 		mng = plt.get_current_fig_manager()
 		mng.window.state('zoomed')
-		plt.title('Makespan: '+str(self.max_time) + ', Average Frame Time: '+str(round(float(self.max_time/FRAMES), 2)))
+		plt.title('Makespan: '+str(self.max_time) + ', Average Frame Time: '+str(round(float(self.max_time/FRAMES), 2))+' (Max FPS: '+str(round(1000/(self.max_time/FRAMES),2))+', Camera: '+str(round(1000/MINIMUM_FRAME_DELAY, 2))+')')
 		plt.show(block=True)
 		
 '''
