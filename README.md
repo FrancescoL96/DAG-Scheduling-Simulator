@@ -5,15 +5,15 @@ Usage: sim.py FILENAME[csv] SCHEDULER(0,1,2) FRAMES(n) PIPELINE(0,1)
 
 Examples:
 
-Simulates using G-FL , 3 frames and no pipeline, loading from "timings.csv" (Default settings)
+Simulates using G-FL , 3 frames and no pipeline, loading from "graph_file.csv" (Default settings)
 ```
 sim.py
 ```
-Simulates using EDD and 2 frames, loading from "timings.csv", using the pipeline
+Simulates using EDD and 2 frames, loading from "graph_file.csv", using the pipeline
 ```
 sim.py 1 2 1
 ```
-Simulates using HEFT, 10 frames and pipeline, loading from "times.csv"
+Simulates using HEFT, 10 frames and pipeline, loading from "graph.csv"
 ```
-sim.py times.csv 2 10 1
+sim.py graph.csv 2 10 1
 ```

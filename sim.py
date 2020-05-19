@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from decimal import Decimal, ROUND_HALF_EVEN
 
-FILENAME = 'timings.csv' # File to import timings 									!!! (can be overridden with program parameters)
+GRAPH_FILE = 'graph_file.csv' # File to import the graph							!!! (can be overridden with program parameters)
 n_cpu = 2
 n_gpu = 1
 PROCESSORS = float(n_cpu+n_gpu)	# Used in the formula to calculate priority points for G-FL
@@ -15,14 +15,14 @@ FRAMES = 3 # Default value is 3 													!!! (can be overridden with program
 MAXIMUM_PIPELINING_ATTEMPTS = 100
 MINIMUM_FRAME_DELAY = 33.33 # The minimum time between frames, 16ms is 60 fps, 33ms is 30 fps, 22ms is 45 fps
 # If set to True, those group of nodes will be scheduled on the GPU
-#nodes_is_gpu = {'scale': False, 'fast': True, 'gauss': True, 'orb': True, 'super': False}
+#nodes_is_gpu = {'scale': False, 'fast': True, 'gauss': False, 'orb': False, 'super': False}
 nodes_is_gpu = {'scale': True, 'fast': True, 'gauss': True, 'orb': False, 'super': False}
 # If set to True it will display a graph with the scheduling
 SHOW_GRAPH = True
 """
 Structure
 	Classes 	(2)
-	Functions	(7)
+	Functions	(11)
 	Main		(1)
 """
 class Node:
@@ -61,7 +61,7 @@ class Node:
 	
 	# Returns the computation time required by this node, taking into account if the node is run on CPU or GPU
 	def time(self):
-		return self.time_gpu if self.is_gpu else self.time_cpu
+		return (self.time_gpu if self.is_gpu else self.time_cpu) + self.copy_time
 		
 	def avg_time(self):
 		if (self.time_cpu != -1 and self.time_gpu != -1):
@@ -85,7 +85,7 @@ class Node:
 	def __str__(self):
 		cpu_time = '\nfinishes at (cpu): ' + str(round(self.scheduled_time + self.time_cpu + self.copy_time, 2))
 		gpu_time = '\nfinishes at (gpu): ' + str(round(self.scheduled_time + self.time_gpu + self.copy_time, 2))
-		concat = gpu_time if (self.is_gpu == True) else cpu_time
+		concat = (gpu_time if (self.is_gpu) else cpu_time) + ' (' + str(self.copy_time) + ')'
 		later = '\nis scheduled at time: '+str(round(self.scheduled_time, 2)) + concat + '\nPriority: ' + str(round(self.priority_point, 2)) + ' Deadline: '+str(round(self.deadline, 2))
 		requirements_str = ''
 		for node in self.requirements:
@@ -292,6 +292,10 @@ class Schedule:
 		self.verify_scheduling(times)
 		self.pipeline(execution_elements_cpu, execution_elements_gpu, times_cpu, times_gpu)
 		
+		self.node_list = execution_elements_cpu + execution_elements_gpu
+		for ce in self.node_list:
+			ce.sort(key=lambda x: x.scheduled_time)
+
 		return self.verify_scheduling(times)
 	
 	# This function creates the scheduling for HEFT, in this case self.node_list_cpu refers to all nodes, and not just the CPU ones (as it moves them between processors it self, the separated queues are not needed)
@@ -351,7 +355,7 @@ class Schedule:
 					# All dependencies are scheduled and we know where we will run this node, we can check if we need to add copy times or not
 					node.check_copy()
 					# Scheduled node list times are updated with the new node times
-					times_gpu[node.scheduled_on_gpu].append((round(node.scheduled_time, 2), round(node.scheduled_time + node.time() + node.copy_time, 2)))
+					times_gpu[node.scheduled_on_gpu].append((round(node.scheduled_time, 2), round(node.scheduled_time + node.time(), 2)))
 					# Scheduled node list is updated with this node
 					execution_elements_gpu[node.scheduled_on_gpu].append(node)
 				else:
@@ -365,7 +369,7 @@ class Schedule:
 						if times_cpu[required_cpu.scheduled_on_cpu][-1][0] == required_cpu.scheduled_time:
 							node.scheduled_on_cpu = required_cpu.scheduled_on_cpu
 					node.check_copy()
-					times_cpu[node.scheduled_on_cpu].append((round(node.scheduled_time, 2), round(node.scheduled_time + node.time() + node.copy_time, 2)))
+					times_cpu[node.scheduled_on_cpu].append((round(node.scheduled_time, 2), round(node.scheduled_time + node.time(), 2)))
 					execution_elements_cpu[node.scheduled_on_cpu].append(node)
 					
 				# Updates the available nodes list (it says CPU but it is for all nodes, it is recycled)
@@ -390,6 +394,10 @@ class Schedule:
 		
 		self.verify_scheduling(times)
 		self.pipeline(execution_elements_cpu, execution_elements_gpu, times_cpu, times_gpu)
+		
+		self.node_list = execution_elements_cpu + execution_elements_gpu
+		for ce in self.node_list:
+			ce.sort(key=lambda x: x.scheduled_time)
 		
 		return self.verify_scheduling(times)
 		
@@ -487,7 +495,7 @@ class Schedule:
 			if req.scheduled_time == -1:
 				return -1
 		# the minimum time possible for this node is the maximum time (scheduled + runtime) obtained from all its dependencies, if this node has no requirements then it can start at time 0
-		node.scheduled_time = round(max((req.scheduled_time + req.copy_time + req.time() for req in node.requirements)) if node.requirements else 0, 2)
+		node.scheduled_time = round(max((req.scheduled_time + req.time() for req in node.requirements)) if node.requirements else 0, 2)
 
 		# If requirements are met (or there are none), it is still needed to check if this task has been released (under the assumption that there is a new frame every MINIMUM_FRAME_DELAY, if we are before this deadline, the task is delayed
 		if node.scheduled_time < node.execution * MINIMUM_FRAME_DELAY:
@@ -503,7 +511,7 @@ class Schedule:
 				# We search for the first gap that can fit our node (super greedy)
 				# Also the first gap after this task has been released (meaining greater than execution*MINIMUM_FRAME_DELAY)
 				# This gap also has to satisfy requirements timings (not only release timings)
-				gap = self.get_first_time_gap(times, node.copy_time + node.time(), node.execution, node)
+				gap = self.get_first_time_gap(times, node.time(), node.execution, node)
 				# If the earliest gap doesn't exist or it is after our task then we continue to the next node
 				if (not gap or gap[0] >= node.scheduled_time):
 					continue
@@ -512,12 +520,12 @@ class Schedule:
 				are_requirements_met = True
 				# All requirements are checked again
 				for req in node.requirements:
-					if gap[0] < req.scheduled_time + req.copy_time + req.time():
+					if gap[0] < req.scheduled_time + req.time():
 						# If a requirement is not met, an attempt for a delay is made
-						attempt_delay = round(req.scheduled_time + req.copy_time + req.time() - gap[0], 2)
+						attempt_delay = round(req.scheduled_time + req.time() - gap[0], 2)
 						# We then check if this delay moves our task outside of the free slice of time
 						# and also we check if this delay causes our task to move to a time after it is already scheduled
-						if (gap[0] + attempt_delay > gap[1] or gap[0] + attempt_delay >= node.scheduled_time or gap[1] - attempt_delay - gap[0] < node.copy_time + node.time()):
+						if (gap[0] + attempt_delay > gap[1] or gap[0] + attempt_delay >= node.scheduled_time or gap[1] - attempt_delay - gap[0] < node.time()):
 							are_requirements_met = False
 							# If the requirements for this node and delay are not met, the delay is reset 
 							node.delay = 0
@@ -530,11 +538,11 @@ class Schedule:
 					# The node is removed from the processor where it is scheduled
 					processor.remove(node)
 					# The nodes is also removed from the timings table
-					times[node.scheduled_on_gpu if node.is_gpu else node.scheduled_on_cpu].remove((round(node.scheduled_time, 2), round(node.scheduled_time + node.copy_time + node.time(), 2)))
+					times[node.scheduled_on_gpu if node.is_gpu else node.scheduled_on_cpu].remove((round(node.scheduled_time, 2), round(node.scheduled_time + node.time(), 2)))
 					# The node is added to the new processor
 					execution_elements[gap[2]].append(node)
 					# We add the node times and the delay to the timings list
-					times[gap[2]].append((round(new_start_time, 2), round(new_start_time + node.copy_time + node.time(), 2)))
+					times[gap[2]].append((round(new_start_time, 2), round(new_start_time + node.time(), 2)))
 					# The node is updated with the new start time
 					node.scheduled_time = round(new_start_time, 2)
 					# The node is also updated with the processor that is running it
@@ -579,7 +587,7 @@ class Schedule:
 						earliest_gap = [processor_times[i-1][1], processor_times[i][1], times.index(processor_times), 'a']
 						
 				# If the gap is wide enough and it's not earlier than the task release time (which is the frame time)
-				elif (processor_times[i][0] - processor_times[i-1][1] > min_gap and processor_times[i-1][1] >= frame_number*MINIMUM_FRAME_DELAY ):
+				elif (processor_times[i][0] - processor_times[i-1][1] >= min_gap and processor_times[i-1][1] >= frame_number*MINIMUM_FRAME_DELAY ):
 					return_value = True
 					# If moving the task to this gap would make it not respect a dependency then a delay is added
 					dependency_delay = 0.0
@@ -588,7 +596,7 @@ class Schedule:
 							return_value = False
 							# All dependencies are explored, the worst one is saved, so that we can attempt a delay
 							if (dependency_delay < req.scheduled_time + req.time() - processor_times[i-1][1]):
-								dependency_delay = req.scheduled_time + +req.copy_time + req.time() - processor_times[i-1][1]
+								dependency_delay = req.scheduled_time + req.time() - processor_times[i-1][1]
 					if (return_value):
 						if (processor_times[i-1][1] < earliest_gap[0]):
 							earliest_gap = [processor_times[i-1][1], processor_times[i][0], times.index(processor_times), 'b']
@@ -600,7 +608,7 @@ class Schedule:
 			
 				# If the gap is wide enough and it's earlier than the task release time there is an attempt to delay it inside the gap
 				# as long as the gap is big enough to host the task and await the start of the frame
-				elif (processor_times[i][0] - processor_times[i-1][1] > min_gap and processor_times[i-1][1] < frame_number*MINIMUM_FRAME_DELAY):
+				elif (processor_times[i][0] - processor_times[i-1][1] >= min_gap and processor_times[i-1][1] < frame_number*MINIMUM_FRAME_DELAY):
 					release_delay = frame_number*MINIMUM_FRAME_DELAY - processor_times[i-1][1]
 					new_gap = processor_times[i][0] - (processor_times[i-1][1] + release_delay)
 					if (processor_times[i-1][1] + release_delay < processor_times[i][0] and min_gap < new_gap):
@@ -663,7 +671,7 @@ class Schedule:
 				if (node.execution >= 0):
 					#name.append(node.name[0]+'_'+str(node.level)+'_'+str(node.execution)+(' ('+str(node.priority_point)+')' if not node.is_gpu else ''))
 					name.append(node.name[0]+'_'+str(node.level)+'_'+str(node.execution))
-					bar.append((node.scheduled_time, node.time() + node.copy_time))
+					bar.append((node.scheduled_time, node.time()))
 						
 					# Creating the actual color vectors
 					if ('scale' in node.name):
@@ -707,6 +715,10 @@ normalize_deadlines
 calculate_priority_points
 HEFT_auto
 HEFT_auto_rec
+import_graph
+calculate_end_points
+calculate_start_points
+add_cross_dependencies_between_frames
 main
 '''		
 
@@ -734,7 +746,7 @@ def EDD_auto_rec(leaf, visited):
 		for next in leaf.required_by:
 			visited.append(leaf) if leaf not in visited else None
 			EDD_auto_rec(next, visited)
-			deadline_candidates.append(next.deadline - next.time() - next.copy_time)
+			deadline_candidates.append(next.deadline - next.time())
 		leaf.deadline = round(min(leaf.deadline, min(deadline_candidates)), 2)
 		
 # Normalizes priorities by summing the lowest value (as they are all negativs)
@@ -763,139 +775,137 @@ def HEFT_auto_rec(leaf, visited):
 			visited.append(leaf) if leaf not in visited else None
 			HEFT_auto_rec(next, visited)
 			rank_candidates.append(next.copy_time + next.heft_rank)
-		leaf.heft_rank = round(max(leaf.heft_rank, leaf.avg_time() + max(rank_candidates)), 2)	
+		leaf.heft_rank = round(max(leaf.heft_rank, leaf.avg_time() + max(rank_candidates)), 2)
+
+# Liv name(0) - Levels(1) - CPU times(2+levels) - GPU times(2+levels*2) - Copy times(2+levels*3) - (Dependencies, Level), ...
+# Imports the DAG from a file with this structure ^ (level for the dependencies is an offset, eg.: i'm node level X and i depend on X + Level from Dependency)
+# Also applies the mapping from the global variable "nodes_is_gpu"
+def import_graph():
+	# This dict will contain all nodes with the following key = ['node name', level, frame number]
+	node_list = {}
+	# The data is read and put into this variable split into rows to be able to run through it multiple times
+	file_data = None
+	with open(GRAPH_FILE) as graph:
+		file_data = graph.read()
+	file_data = file_data.split('\n')
+	node_max_level = {}
+	# For each frame we add all the nodes of the file to the node list
+	for frame in range(0, FRAMES):
+		dependencies = {}
+		node_max_level = {}
+		for row in file_data:
+			line = row.split(',')
+			# All the node data os acquired
+			node_name = line[0]
+			node_levels = int(line[1])
+			node_cpu_times = [float(line[2+i]) for i in range(0, node_levels)]
+			node_gpu_times = [float(line[2+node_levels+i]) for i in range(0, node_levels)]
+			node_copy_times = [float(line[2+node_levels*2+i]) for i in range(0, node_levels)]
+			node_max_level[node_name] = node_levels - 1
+			# Dependencies are coded as a tuple, so after copy times we have ('dependency name', level) repeated for as many dependencies
+			for i in range (2+node_levels*3, len(line), 2):
+				if node_name not in dependencies.keys():
+					dependencies[node_name] = [(line[i], int(line[i+1]))]
+				else:
+					dependencies[node_name].append((line[i], int(line[i+1])))
+			# We create and add all the nodes to the dict
+			for level in range(0, node_levels):
+				node_list[node_name, level, frame] = Node(node_name, level, node_cpu_times[level], [], frame, node_gpu_times[level], node_copy_times[level])
+		# We use the dict just created and the dependencies to update all the nodes with their respective dependencies
+		# This bit of code is fairly complicated (aka garbage)
+		# We run through all the nodes we just created, but we do not want all of them, just the current frame
+		# Instead of just using key, we use key[0] for the node name and key[1] for the level, and frame for the frame (instead of key[2])
+		# Now we need all the dependencies for that node, which are store in dependencies['node name'], and the node name is key_node[0]
+		# At this point we want that the offset of the level plus the level of the node is greater than zero and that the sum of the two is not greater than the maximum level of the dependency (which might happend eg. if a node level 3 is dependent on a node with no levels)
+		# Then we add the dependency to the node key_node[0], key_node[1], frame (name, level, frame), taking the node from the node's list
+		for key_node in node_list:
+			for key_dep in dependencies[key_node[0]]:
+				if (key_node[1]+key_dep[1] >= 0 and key_node[1]+key_dep[1] <= node_max_level[key_dep[0]] and node_list[key_dep[0], key_node[1]+key_dep[1], frame] not in node_list[key_node[0], key_node[1], frame].requirements):
+					node_list[key_node[0], key_node[1], frame].requirements.append(node_list[key_dep[0], key_node[1]+key_dep[1], frame])
+				elif (key_node[1]+key_dep[1] >= 0 and key_node[1]+key_dep[1] > node_max_level[key_dep[0]] and node_list[key_dep[0], node_max_level[key_dep[0]], frame] not in node_list[key_node[0], key_node[1], frame].requirements):
+					node_list[key_node[0], key_node[1], frame].requirements.append(node_list[key_dep[0], node_max_level[key_dep[0]], frame])
+			
+	# If the node has a GPU and CPU time the variable "nodes_is_gpu" is accessed to check which implementation to use
+	for key in node_list:
+		if (node_list[key].time_gpu != -1 and node_list[key].time_cpu != -1):
+			node_list[key].set_gpu(nodes_is_gpu[node_list[key].name])
+		# If there is only a GPU time, then it is a GPU node
+		elif (node_list[key].time_gpu != -1 and node_list[key].time_cpu == -1):
+			node_list[key].set_gpu(True)
+		# If there is only a CPU time, then it is not a GPU node
+		elif (node_list[key].time_gpu == -1 and node_list[key].time_cpu != -1):	
+			node_list[key].set_gpu(False)
+	return node_list
+	
+# Calculates end points, which are the nodes that are not required by any other node
+def calculate_end_points(node_list):
+	end_points = []
+	for key_candidates in node_list:
+		candidate = node_list[key_candidates]
+		valid = True
+		# For every node it checks if it is required by any other
+		for key_comparison in node_list:
+			if candidate in node_list[key_comparison].requirements:
+				# If so, this node is not a valid candidate
+				valid = False
+		if (valid and candidate not in end_points):
+			end_points.append(candidate)
+	return end_points
+			
+# Calculates start points, which are the nodes that do not require any other node to run
+def calculate_start_points(node_list):
+	start_points = []
+	for key in node_list:
+		if not node_list[key].requirements and node_list[key] not in start_points:
+			start_points.append(node_list[key])
+	return start_points
+	
+# Adds dependencies to start and end nodes so that no frame can start before the earlier frame and no frame can end before the earlier frame
+def add_cross_dependencies_between_frames(node_list, start_points, end_points):
+	start_points.sort(key = lambda x: x.execution)
+	end_points.sort(key = lambda x: x.execution)
+	for frame in range(1, FRAMES):
+		for i in range(1, len(start_points)):
+			if start_points[i-1] not in start_points[i].requirements:
+				start_points[i].requirements.append(start_points[i-1])
+			#end_points[i].requirements.append(end_points[i-1])
 		
 def main():
-	# Dependencies should be imported from a file, for now they are hardcoded
-	levels = 8
+	node_list = import_graph()
+	if (not HEFT):
+		for key in node_list:
+			node_list[key].check_copy()
+			
+	end_points = calculate_end_points(node_list)
+	start_points = calculate_start_points(node_list)
+	add_cross_dependencies_between_frames(node_list, start_points, end_points)
+	create_dependencies_graph_rec(end_points)
 	
-	scale = [[] for i in range(0, FRAMES)]
-	fast = [[] for i in range(0, FRAMES)]
-	grid = [[] for i in range(0, FRAMES)]
-	gauss = [[] for i in range(0, FRAMES)]
-	orb = [[] for i in range(0, FRAMES)]
-	super = [[] for i in range(0, FRAMES)]
-	deep_learning = [[] for i in range(0, FRAMES)]
-	
-	# Creates all the nodes
-	# Only Grid and Orb have copy times because they are run on the CPU and they need data from the GPU
-	# Scale needs data from Scale, but they are all run on the GPU, no data copy needed (same for Fast and Gauss)
-	
-	timings = {}
-	with open(FILENAME) as timings_file:
-		for row in timings_file:
-			elements = row.split(',')
-			values = [float(elements[i]) for i in range(1, len(elements))]
-			timings[elements[0]] = values
-	
-	# All scale_0 nodes, as they are the first to execute of each frame, have special dependencies, and are set before
-	# Node(name, level, time, requirements, execution, time_gpu = -1, copy_time = 0):
-	scale[0].append(Node('scale', 0, timings['scale_cpu'][0], [], execution=0, time_gpu=timings['scale_gpu'][0]))
-	scale[0][0].set_gpu(nodes_is_gpu['scale'])
-	
-	for execution in range(0, FRAMES):
-		# First node of each execution has special treatment due to special constraints
-		if execution > 0:
-			scale[execution].append(Node('scale', 0, timings['scale_cpu'][0], [scale[execution-1][0]], execution, timings['scale_gpu'][0]))
-			scale[execution][0].set_gpu(nodes_is_gpu['scale'])
-			
-		super[execution].append(Node('super', 0, timings['super_cpu'][0], [scale[execution][0]], execution, timings['super_gpu'][0]))
-		super[execution][0].set_gpu(nodes_is_gpu['super'])
-		
-		# As scale_0 are set outside, we need to skip them here, where we initialize all the other nodes
-		for level in range(1, levels):
-			scale[execution].append(Node('scale', level, timings['scale_cpu'][level], [scale[execution][level-1]], execution, timings['scale_gpu'][level]))
-			scale[execution][level].set_gpu(nodes_is_gpu['scale'])
-			
-		for level in range(0, levels):
-			fast[execution].append(Node('fast', level, timings['fast_cpu'][level], [scale[execution][level]], execution, timings['fast_gpu'][level], copy_time=timings['orb_cpu_gpu_copy'][level]))
-			fast[execution][level].set_gpu(nodes_is_gpu['fast'])
-			
-			grid[execution].append(Node('grid', level, timings['grid_cpu'][level], [fast[execution][level], super[execution][0]], execution, copy_time=timings['grid_cpu_gpu_copy'][level]))
-			
-			gauss[execution].append(Node('gauss', level, timings['gauss_cpu'][level], [scale[execution][level]], execution, timings['gauss_gpu'][level]))
-			gauss[execution][level].set_gpu(nodes_is_gpu['gauss'])
-			
-			if (level == 7 and execution > 0):
-				# A Frame cannot complete computing before an earlier one
-				orb[execution].append(Node('orb', level, timings['orb_cpu'][level], [gauss[execution][level], grid[execution][level], orb[execution-1][7], super[execution][0]], execution, timings['orb_gpu'][level], copy_time=timings['orb_cpu_gpu_copy'][level]))
-			else:
-				orb[execution].append(Node('orb', level, timings['orb_cpu'][level], [gauss[execution][level], grid[execution][level], super[execution][0]], execution, timings['orb_gpu'][level], copy_time=timings['orb_cpu_gpu_copy'][level]))
-			orb[execution][level].set_gpu(nodes_is_gpu['orb'])
-			
-		deep_learning[execution].append(Node('deep_learning', 0, timings['deep_learning_cpu'][0], [scale[execution][0]], execution, timings['deep_learning_gpu'][0]))
-		deep_learning[execution][0].set_gpu()
-
 	if (HEFT):
 		all_nodes = []
 	all_nodes_cpu = [] # CPU queue
-	all_nodes_gpu = [] # GPu queue
-	for execution in range(0, FRAMES):
-		end_points = [orb[execution][i] for i in range (0, levels)]	# This are the nodes that no other node depends on
-		end_points.append(deep_learning[execution][0])
-		create_dependencies_graph_rec(end_points)
-
-		EDD_auto([scale[execution][0]]) # Creates deadlines
-		HEFT_auto([scale[execution][0]])
-		all_nodes_exec = [deep_learning[execution][0]]
-		all_nodes_exec.append(super[execution][0])
-		for i in range(0, levels):
+	all_nodes_gpu = [] # GPU queue
+	for frame in range(0, FRAMES):
+		EDD_auto(start_points)
+		HEFT_auto(start_points)
+		
+		all_nodes_exec = []
+		for key in node_list:
 			# These are the nodes for the execution under exam
-			all_nodes_exec.append(scale[execution][i])
-			all_nodes_exec.append(fast[execution][i])
-			all_nodes_exec.append(grid[execution][i])
-			all_nodes_exec.append(gauss[execution][i])
-			all_nodes_exec.append(orb[execution][i])
+			all_nodes_exec.append(node_list[key[0], key[1], frame])
 			# These are ALL the nodes used for the scheduling
 			# They are added to the respective queue if they are a GPU node or not
 			# Scale
 			if (not HEFT): # As HEFT decides the processor to use too, unlike EDD and G-FL, the queues are created differently
-				if scale[execution][i].is_gpu:
-					all_nodes_gpu.append(scale[execution][i])
+				if node_list[key[0], key[1], frame].is_gpu:
+					all_nodes_gpu.append(node_list[key[0], key[1], frame])
 				else:
-					all_nodes_cpu.append(scale[execution][i])
-				# Fast
-				if fast[execution][i].is_gpu:
-					all_nodes_gpu.append(fast[execution][i])
-				else:
-					all_nodes_cpu.append(fast[execution][i])
-				# Grid
-				if grid[execution][i].is_gpu:
-					all_nodes_gpu.append(grid[execution][i])
-				else:
-					all_nodes_cpu.append(grid[execution][i])
-				# Gauss
-				if gauss[execution][i].is_gpu:
-					all_nodes_gpu.append(gauss[execution][i])
-				else:
-					all_nodes_cpu.append(gauss[execution][i])
-				# Orb
-				if orb[execution][i].is_gpu:
-					all_nodes_gpu.append(orb[execution][i])
-				else:
-					all_nodes_cpu.append(orb[execution][i])
-			if (HEFT):
-				all_nodes.append(scale[execution][i])
-				all_nodes.append(fast[execution][i])
-				all_nodes.append(grid[execution][i])
-				all_nodes.append(gauss[execution][i])
-				all_nodes.append(orb[execution][i])
-
-		if super[execution][0].is_gpu:
-			all_nodes_gpu.append(super[execution][0])
-		else:
-			all_nodes_cpu.append(super[execution][0])
-			
+					all_nodes_cpu.append(node_list[key[0], key[1], frame])
+			else:
+				all_nodes.append(node_list[key[0], key[1], frame])
+				
 		normalize_deadlines(all_nodes_exec)
 		calculate_priority_points(all_nodes_exec)
-		# Deep learning is GPU only and has no levels so its added outside the for cycle
-		all_nodes_gpu.append(deep_learning[execution][0])
-		if (HEFT):
-			all_nodes.append(deep_learning[execution][0])
-	
-	if (not HEFT):
-		for node in all_nodes_cpu+all_nodes_gpu:
-			node.check_copy()
 	
 	# All the nodes are ordered by their priority point (as G-FL demands) or deadline
 	if (DEADLINE):
@@ -905,16 +915,16 @@ def main():
 		all_nodes_cpu.sort(key=lambda x: x.priority_point, reverse=False)
 		all_nodes_gpu.sort(key=lambda x: x.deadline, reverse=False)
 	else:
-		all_nodes.sort(key=lambda x: x.heft_rank, reverse=True)
-
-	# Sort all nodes using a stable algorithm by execution (if they have the same priority the earlier executions go first)
-	all_nodes_cpu.sort(key=lambda x: x.execution, reverse=False)
-	all_nodes_gpu.sort(key=lambda x: x.execution, reverse=False)
+		all_nodes.sort(key=lambda x: x.heft_rank, reverse=True)	
 	
 	if (HEFT):
+		all_nodes.sort(key=lambda x: x.execution, reverse=False)
 		scheduler = Schedule(all_nodes, [], n_cpu, n_gpu)
 		max_time = scheduler.create_schedule_HEFT()
 	else:
+		# Sort all nodes using a stable algorithm by execution (if they have the same priority the earlier executions go first)
+		all_nodes_cpu.sort(key=lambda x: x.execution, reverse=False)
+		all_nodes_gpu.sort(key=lambda x: x.execution, reverse=False)
 		scheduler = Schedule(all_nodes_cpu, all_nodes_gpu, n_cpu, n_gpu)
 		max_time = scheduler.create_schedule()
 	
@@ -936,7 +946,7 @@ def main():
 	max_lateness = 0
 	avg_lateness = 0
 	for node in all_nodes:
-		lateness = node.scheduled_time + node.time() + node.copy_time - (node.deadline + MINIMUM_FRAME_DELAY * node.execution)
+		lateness = node.scheduled_time + node.time() - (node.deadline + MINIMUM_FRAME_DELAY * node.execution)
 		avg_lateness += lateness
 		max_lateness = max(max_lateness, lateness)
 	
@@ -951,7 +961,7 @@ def main():
 		for execution in range(0, FRAMES):
 			if node.execution == execution:
 				min_time[execution] = round(min(min_time[execution], node.scheduled_time), 2)
-				max_time[execution] = round(max(max_time[execution], node.scheduled_time+node.copy_time+node.time()), 2)
+				max_time[execution] = round(max(max_time[execution], node.scheduled_time+node.time()), 2)
 	print('Exact frame times: ')
 	sum_frame_times = 0
 	for i in range(0, FRAMES):
@@ -961,11 +971,11 @@ def main():
 	
 	if (SHOW_GRAPH):
 		scheduler.create_bar_graph(labels=GPU_labels + CPU_labels)
-
+	
 if __name__ == '__main__':
 	if (len(sys.argv) == 5):
 		try:
-			FILENAME = sys.argv[1]
+			GRAPH_FILE = sys.argv[1]
 			if int(sys.argv[2]) == 1:
 				DEADLINE = True
 			elif int(sys.argv[2]) == 0:
@@ -975,7 +985,7 @@ if __name__ == '__main__':
 			FRAMES = int(sys.argv[3])
 			PIPELINING = bool(int(sys.argv[4]))
 		except:
-			print('Usage: \n sim.py timings_file.csv SCHEDULING(0,1,2) FRAMES(n) PIPELINE(0,1)\nExample: open timings.csv, simulate three frames and use EDD with Pipeline\n\tsim.py timings.csv 1 3 1', file=sys.stderr)
+			print('Usage: \n sim.py FILENAME[csv] SCHEDULING(0,1,2) FRAMES(n) PIPELINE(0,1)\nExample: open graph.csv, simulate three frames and use EDD with Pipeline\n\tsim.py graph.csv 1 3 1', file=sys.stderr)
 			exit()
 	elif (len(sys.argv) == 4):
 		try:
@@ -988,7 +998,7 @@ if __name__ == '__main__':
 			FRAMES = int(sys.argv[2])
 			PIPELINING = bool(int(sys.argv[3]))
 		except:
-			print('Usage: \n sim.py [timings_file.csv] SCHEDULING(0,1,2) FRAMES(n) PIPELINE(0,1)\nExample: open timings.csv, simulate three frames and use EDD with pipeline\n\tsim.py 1 3 1', file=sys.stderr)
+			print('Usage: \n sim.py FILENAME[csv] SCHEDULING(0,1,2) FRAMES(n) PIPELINE(0,1)\nExample: open graph_file.csv, simulate three frames and use EDD with pipeline\n\tsim.py 1 3 1', file=sys.stderr)
 			exit()
 	elif (len(sys.argv) == 3):
 		try:
@@ -1000,12 +1010,12 @@ if __name__ == '__main__':
 				HEFT = True
 			FRAMES = int(sys.argv[2])
 		except:
-			print('Usage: \n sim.py [timings_file.csv] SCHEDULING(0,1,2) FRAMES(n) PIPELINE(0,1)\nExample: open timings.csv, simulate three frames and use EDD without pipeline\n\tsim.py 1 3', file=sys.stderr)
+			print('Usage: \n sim.py FILENAME[csv] SCHEDULING(0,1,2) FRAMES(n) PIPELINE(0,1)\nExample: open graph_file.csv, simulate three frames and use EDD without pipeline\n\tsim.py 1 3', file=sys.stderr)
 			exit()
 	elif (len(sys.argv) == 2):
 		if (sys.argv[1][0]) == '?':
 			GFL = True
-			print('Usage: \n sim.py FILENAME[csv] DEADLINE(0,1) FRAMES(n)\nExample: open timings.csv, simulate three frames and use EDD without Pipeline\n\tsim.py timings.csv 1 3 0\nRunning with default settings: \n\tFile ' +str(FILENAME) + ' Frames: '+str(FRAMES) + ' Scheduling: GFL = '+str(GFL) + ' Pipeline: '+str(PIPELINING))
+			print('Usage: \n sim.py FILENAME[csv] DEADLINE(0,1) FRAMES(n)\nExample: open timings.csv, simulate three frames and use EDD without Pipeline\n\tsim.py graph_file.csv 1 3 0\nRunning with default settings: \n\tFile ' +str(GRAPH_FILE) + ' Frames: '+str(FRAMES) + ' Scheduling: GFL = '+str(GFL) + ' Pipeline: '+str(PIPELINING))
 	else:
 		GFL = True
 	main()
