@@ -340,8 +340,31 @@ class Schedule:
 						if min_time_gpu[0] > gpu[-1][1]:
 							min_time_gpu[0] = gpu[-1][1]
 							min_time_gpu[1] = times_gpu.index(gpu)
-				# If the node finishes on the GPU before it can finish on the CPU we run it there (having a GPU time or not is deciced through the min_time set to 50000)
+				
+				# If the node finishes on the GPU before it can finish on the CPU we run it there (having a GPU time or not is deciced through the min_time set to 50000)				
 				if min_time_cpu[0] + node.time_cpu > min_time_gpu[0] + node.time_gpu:
+					
+					# If this node has to wait before it can start, we try a different node that maybe doesn't have to wait, without delaying this one
+					if node.scheduled_time - (times_gpu[min_time_gpu[1]][-1][1] if node.scheduled_time - times_gpu[min_time_gpu[1]][-1][1] > 0 else 0) > 0:
+						# We skip the first node, as we already considered it
+						for i in range(1, len(self.available_cpu[self.current_frame])):
+							# We take one of the available to run nodes
+							attempt_early_start_node = self.available_cpu[self.current_frame][i]
+							# We check if it can start (it should be able to, as it is in the ready queue, all dependencies should be already scheduled)
+							self.set_minimum_start_time(attempt_early_start_node)
+							# We calculate how long it would have to wait in the current situation before it can run (even if all dependencies have been scheduled, they may have not finished running)
+							delay_early_node = attempt_early_start_node.scheduled_time - times_gpu[min_time_gpu[1]][-1][1] if attempt_early_start_node.scheduled_time - times_gpu[min_time_gpu[1]][-1][1] > 0 else 0
+							# We check if running this node before the highest priority one would delay it, if not, we run this node
+							if times_gpu[min_time_gpu[1]][-1][1] + delay_early_node + attempt_early_start_node.time_gpu + attempt_early_start_node.copy_time < node.scheduled_time and attempt_early_start_node.time_gpu != -1:
+								# This node is not currently scheduled so its time is reset
+								node.scheduled_time = -1
+								# The new node to schedule is this new one, that doesn't delay the current one
+								node = attempt_early_start_node
+								break
+							else:
+								# If it does delay, we reset the time and keep searching
+								attempt_early_start_node.scheduled_time = -1
+				
 					# All the values of the node are updated
 					node.delay = node.scheduled_time - times_gpu[min_time_gpu[1]][-1][1] if node.scheduled_time - times_gpu[min_time_gpu[1]][-1][1] > 0 else 0
 					node.scheduled_time = round(times_gpu[min_time_gpu[1]][-1][1] + node.delay, 2)
@@ -360,6 +383,18 @@ class Schedule:
 					execution_elements_gpu[node.scheduled_on_gpu].append(node)
 				else:
 					# Behaves the same as above, but if running on the CPU is the better choice
+					if node.scheduled_time - (times_cpu[min_time_cpu[1]][-1][1] if node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] > 0 else 0) > 0:
+						for i in range(1, len(self.available_cpu[self.current_frame])):
+							attempt_early_start_node = self.available_cpu[self.current_frame][i]
+							self.set_minimum_start_time(attempt_early_start_node)
+							delay_early_node = attempt_early_start_node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] if attempt_early_start_node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] > 0 else 0
+							if times_cpu[min_time_cpu[1]][-1][1] + delay_early_node + attempt_early_start_node.time_cpu + attempt_early_start_node.copy_time < node.scheduled_time and attempt_early_start_node.time_cpu != -1:
+								node.scheduled_time = -1
+								node = attempt_early_start_node
+								break
+							else:
+								attempt_early_start_node.scheduled_time = -1
+					
 					node.delay = node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] if node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] > 0 else 0
 					node.scheduled_time = round(times_cpu[min_time_cpu[1]][-1][1] + node.delay, 2)
 					node.scheduled_on_cpu = min_time_cpu[1]
@@ -458,6 +493,7 @@ class Schedule:
 		total_time_old = total_time
 		if (PIPELINING):
 			print('Makespan post-pipelining: ' + str(round(max(times_cpu+times_gpu, key=lambda x: x[-1][1])[-1][1], 2)) + ' ('+str(round((self.max_time_pipelining/round(max(times_cpu+times_gpu, key=lambda x: x[-1][1])[-1][1], 2)-1)*100, 2))+'%)')
+			self.max_time_pipelining = round(max(times_cpu+times_gpu, key=lambda x: x[-1][1])[-1][1], 2)
 			print('Idle times after pipelining: ')
 			total_time = self.calculate_idle_time(times_cpu)
 			total_time += self.calculate_idle_time(times_gpu, is_gpu=True)
@@ -565,11 +601,12 @@ class Schedule:
 			for i in range(1, len(processor_times)):
 				if (processor_times[i][0] - processor_times[i-1][1]) > 0.0:
 					idle_time += processor_times[i][0] - processor_times[i-1][1]
+			idle_time += (self.max_time_pipelining - processor_times[-1][1])
 			total_time += idle_time
 			if (not is_gpu):
-				print('CPU '+str(times.index(processor_times))+': '+str(round(idle_time, 2))+' ('+str(round(idle_time/processor_times[-1][1] * 100, 2))+'%)')
+				print('CPU '+str(times.index(processor_times))+': '+str(round(idle_time, 2))+' ('+str(round(idle_time/self.max_time_pipelining * 100, 2))+'%)')
 			else:
-				print('GPU '+str(times.index(processor_times))+': '+str(round(idle_time, 2))+' ('+str(round(idle_time/processor_times[-1][1] * 100, 2))+'%)')
+				print('GPU '+str(times.index(processor_times))+': '+str(round(idle_time, 2))+' ('+str(round(idle_time/self.max_time_pipelining * 100, 2))+'%)')
 		return round(total_time, 2)
 				
 
@@ -626,6 +663,8 @@ class Schedule:
 	# This function prints the Grantt graph of the scheduled nodes
 	# Supports any number of processors (more or less, zooming in and out might be required)
 	def create_bar_graph(self, labels):
+		distance = 13 - PROCESSORS
+	
 		# If the scheduling is not verified it cannot be shown
 		if (not self.verified):
 			return
@@ -653,7 +692,7 @@ class Schedule:
 		gnt.set_xlabel('Milliseconds since start') 
 		gnt.set_ylabel('Processor')
 
-		gnt.set_yticks([15+i*10 for i in range(0, len(labels))])
+		gnt.set_yticks([distance+3+i*distance for i in range(0, len(labels))])
 		gnt.set_yticklabels(labels) 
 		
 		gnt.yaxis.grid(True)
@@ -670,7 +709,7 @@ class Schedule:
 			for node in computing_element:
 				if (node.execution >= 0):
 					#name.append(node.name[0]+'_'+str(node.level)+'_'+str(node.execution)+(' ('+str(node.priority_point)+')' if not node.is_gpu else ''))
-					name.append(node.name[0]+'_'+str(node.level)+'_'+str(node.execution))
+					name.append(node.name[0]+node.name[-1]+'_'+str(node.level)+'_'+str(node.execution))
 					bar.append((node.scheduled_time, node.time()))
 						
 					# Creating the actual color vectors
@@ -693,11 +732,11 @@ class Schedule:
 			colors.append(color)
 		# Creates the broken bars, using the bars and color vectors
 		for i in range(0, len(bars)):				
-			gnt.broken_barh(bars[i], (10*len(bars)-i*10, 6), facecolors=tuple(colors[i]), edgecolor='white')
+			gnt.broken_barh(bars[i], (distance*len(bars)-i*distance, 3), facecolors=tuple(colors[i]), edgecolor='white')
 		# Writes the names of the nodes separetly
 		for i in range(0, len(bars)):	
 			for j in range(0, len(bars[i])):
-				gnt.text(x=bars[i][j][0]+bars[i][j][1]/2, y=7+10*len(bars)-i*10+(j%3), s=names[i][j], ha='center', va='center', color='black',)
+				gnt.text(x=bars[i][j][0]+bars[i][j][1]/2, y=(4)+distance*len(bars)-i*distance+(j%3), s=names[i][j], ha='center', va='center', color='black',)
 		# Adds the frame times line (skips frame zero, as that's the start of the graph)
 		for i in range(1, FRAMES):
 			plt.plot([i*MINIMUM_FRAME_DELAY,i*MINIMUM_FRAME_DELAY], [0,100], '-.', color='gray', alpha=0.5)
@@ -827,7 +866,7 @@ def import_graph():
 			if (node_list[key].time_gpu < node_list[key].time_cpu):
 				node_list[key].set_gpu(True)
 		# If there is only a GPU time, then it is a GPU node
-		elif (node_list[key].time_gpu != -1 and node_list[key].time_cpu == -1g):
+		elif (node_list[key].time_gpu != -1 and node_list[key].time_cpu == -1):
 			node_list[key].set_gpu(True)
 		# If there is only a CPU time, then it is not a GPU node
 		elif (node_list[key].time_gpu == -1 and node_list[key].time_cpu != -1):	
@@ -935,7 +974,7 @@ def main():
 		print('Makespan HEFT: ', end=' ')
 	print(str(max_time) + ' ('+str(round(max_time/FRAMES, 2))+')')
 
-	GPU_labels = ['GPU '+str(i) for i in range(0, n_gpu)]
+	GPU_labels = ['GPU '+str(i) for i in range(n_gpu-1, -1, -1)]
 	CPU_labels = ['CPU '+str(i) for i in range(n_cpu-1, -1, -1)]
 	
 	if (not HEFT):
