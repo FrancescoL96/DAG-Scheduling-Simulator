@@ -11,12 +11,16 @@ DEADLINE = False # If set to true it will schedule using EDD 						!!! (can be o
 GFL = False # If set to true it will schedule using G-FL (CPU only) 				!!! (can be overridden with program parameters)
 HEFT = False # If set to true it will schedule using HEFT 							!!! (can be overridden with program parameters)
 PIPELINING = False # If set to true it will enable pipelining						!!! (can be overridden with program parameters)
-FRAMES = 3 # Default value is 3 													!!! (can be overridden with program parameters)
+FRAMES = 3 # Number of frames to simulate, defualt is 3								!!! (can be overridden with program parameters)
 MAXIMUM_PIPELINING_ATTEMPTS = 100
 MINIMUM_FRAME_DELAY = 33.33 # The minimum time between frames, 16ms is 60 fps, 33ms is 30 fps, 22ms is 45 fps
 
+# If set to False it will make ORB a CPU Only node
+ORB_GPU = True
+
 # If set to True it will display a graph with the scheduling
 SHOW_GRAPH = True
+
 """
 Structure
 	Classes 	(2)
@@ -355,6 +359,7 @@ class Schedule:
 							# We calculate how long it would have to wait in the current situation before it can run (even if all dependencies have been scheduled, they may have not finished running)
 							delay_early_node = attempt_early_start_node.scheduled_time - times_gpu[min_time_gpu[1]][-1][1] if attempt_early_start_node.scheduled_time - times_gpu[min_time_gpu[1]][-1][1] > 0 else 0
 							# We check if running this node before the highest priority one would delay it, if not, we run this node
+							# We also need to check if this node has a GPU implementation before we can run it
 							if times_gpu[min_time_gpu[1]][-1][1] + delay_early_node + attempt_early_start_node.time_gpu + attempt_early_start_node.copy_time < node.scheduled_time and attempt_early_start_node.time_gpu != -1:
 								# This node is not currently scheduled so its time is reset
 								node.scheduled_time = -1
@@ -871,6 +876,10 @@ def import_graph():
 		# If there is only a CPU time, then it is not a GPU node
 		elif (node_list[key].time_gpu == -1 and node_list[key].time_cpu != -1):	
 			node_list[key].set_gpu(False)
+		# As our current GPU implementation of ORB suffers from casual crashes this is in place for testing and quickly enabling/disabling the GPU implementation
+		if 'orb' in key[0] and not ORB_GPU:
+			node_list[key].set_gpu(False)
+			node_list[key].time_gpu = -1
 	return node_list
 	
 # Calculates end points, which are the nodes that are not required by any other node
