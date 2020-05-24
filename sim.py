@@ -1,9 +1,10 @@
+import os
 import sys
 import matplotlib.pyplot as plt 
 import matplotlib.patches as mpatches
 from decimal import Decimal, ROUND_HALF_EVEN
 
-GRAPH_FILE = 'graph_file.csv' # File to import the graph							!!! (can be overridden with program parameters)
+GRAPH_FILE = 'orb_graph.csv' # File to import the graph							!!! (can be overridden with program parameters)
 n_cpu = 2
 n_gpu = 1
 PROCESSORS = float(n_cpu+n_gpu)	# Used in the formula to calculate priority points for G-FL
@@ -19,12 +20,12 @@ MINIMUM_FRAME_DELAY = 33.33 # The minimum time between frames, 16ms is 60 fps, 3
 ORB_GPU = True
 
 # If set to True it will display a graph with the scheduling
-SHOW_GRAPH = True
+SHOW_GRAPH = False
 
 """
 Structure
 	Classes 	(2)
-	Functions	(11)
+	Functions	(14)
 	Main		(1)
 """
 class Node:
@@ -763,6 +764,9 @@ import_graph
 calculate_end_points
 calculate_start_points
 add_cross_dependencies_between_frames
+simulation
+disable_print
+enable_print
 main
 '''		
 
@@ -914,7 +918,7 @@ def add_cross_dependencies_between_frames(node_list, start_points, end_points):
 			if start_points[i-1] not in start_points[i].requirements:
 				start_points[i].requirements.append(start_points[i-1])
 		
-def main():
+def simulation():
 	node_list = import_graph()
 	if (not HEFT):
 		for key in node_list:
@@ -950,7 +954,6 @@ def main():
 					all_nodes.append(node_list[key[0], key[1], frame])
 		normalize_deadlines(all_nodes_exec)
 		calculate_priority_points(all_nodes_exec)
-	#print(node_list['scale2', 1, 0])
 		
 	# All the nodes are ordered by their priority point (as G-FL demands) or deadline
 	if (DEADLINE):
@@ -1014,54 +1017,85 @@ def main():
 		sum_frame_times += max_time[i]-min_time[i]
 		print(round(max_time[i]-min_time[i], 2), end=' ')	
 	print('\nAverage frame time: '+str(round(sum_frame_times/FRAMES, 2)))
-	
+
 	if (SHOW_GRAPH):
 		scheduler.create_bar_graph(labels=GPU_labels + CPU_labels)
+
+	return scheduler.max_time, str(scheduler.max_time)+' ('+str(round(scheduler.max_time/FRAMES, 2))+')'
 	
-if __name__ == '__main__':
-	if (len(sys.argv) == 5):
+# Disables stdout for prints
+def disable_print():
+    sys.stdout = open(os.devnull, 'w')
+	
+# Enables stdout for prints
+def enable_print():
+    sys.stdout = sys.__stdout__
+	
+def main(argv):
+	global GRAPH_FILE, DEADLINE, GFL, HEFT, FRAMES, PIPELINING, n_cpu
+	if (len(argv) == 5):
 		try:
-			GRAPH_FILE = sys.argv[1]
-			if int(sys.argv[2]) == 1:
+			GRAPH_FILE = argv[0]
+			if int(argv[1]) == 1:
 				DEADLINE = True
-			elif int(sys.argv[2]) == 0:
+			elif int(argv[1]) == 0:
 				GFL = True
 			else:
 				HEFT = True
-			FRAMES = int(sys.argv[3])
-			PIPELINING = bool(int(sys.argv[4]))
+			FRAMES = int(argv[2])
+			PIPELINING = bool(int(argv[3]))
+			n_cpu = int(argv[4]) if int(argv[4]) <= 5 else 5
+		except:
+			print('Error (Using 5 args input mode)')
+	elif (len(argv) == 4):
+		try:
+			GRAPH_FILE = argv[0]
+			if int(argv[1]) == 1:
+				DEADLINE = True
+			elif int(argv[1]) == 0:
+				GFL = True
+			else:
+				HEFT = True
+			FRAMES = int(argv[2])
+			PIPELINING = bool(int(argv[3]))
 		except:
 			print('Usage: \n sim.py FILENAME[csv] SCHEDULING(0,1,2) FRAMES(n) PIPELINE(0,1)\nExample: open graph.csv, simulate three frames and use EDD with Pipeline\n\tsim.py graph.csv 1 3 1', file=sys.stderr)
 			exit()
-	elif (len(sys.argv) == 4):
+	elif (len(argv) == 3):
 		try:
-			if int(sys.argv[1]) == 1:
+			if int(argv[0]) == 1:
 				DEADLINE = True
-			elif int(sys.argv[1]) == 0:
+			elif int(argv[0]) == 0:
 				GFL = True
 			else:
 				HEFT = True
-			FRAMES = int(sys.argv[2])
-			PIPELINING = bool(int(sys.argv[3]))
+			FRAMES = int(argv[1])
+			PIPELINING = bool(int(argv[2]))
 		except:
 			print('Usage: \n sim.py FILENAME[csv] SCHEDULING(0,1,2) FRAMES(n) PIPELINE(0,1)\nExample: open graph_file.csv, simulate three frames and use EDD with pipeline\n\tsim.py 1 3 1', file=sys.stderr)
 			exit()
-	elif (len(sys.argv) == 3):
+	elif (len(argv) == 2):
 		try:
-			if int(sys.argv[1]) == 1:
+			if int(argv[0]) == 1:
 				DEADLINE = True
-			elif int(sys.argv[1]) == 0:
+			elif int(argv[0]) == 0:
 				GFL = True
 			else:
 				HEFT = True
-			FRAMES = int(sys.argv[2])
+			FRAMES = int(argv[1])
 		except:
 			print('Usage: \n sim.py FILENAME[csv] SCHEDULING(0,1,2) FRAMES(n) PIPELINE(0,1)\nExample: open graph_file.csv, simulate three frames and use EDD without pipeline\n\tsim.py 1 3', file=sys.stderr)
 			exit()
-	elif (len(sys.argv) == 2):
-		if (sys.argv[1][0]) == '?':
+	elif (len(argv) == 1):
+		if (argv[0][0]) == '?':
 			GFL = True
 			print('Usage: \n sim.py FILENAME[csv] DEADLINE(0,1) FRAMES(n)\nExample: open timings.csv, simulate three frames and use EDD without Pipeline\n\tsim.py graph_file.csv 1 3 0\nRunning with default settings: \n\tFile ' +str(GRAPH_FILE) + ' Frames: '+str(FRAMES) + ' Scheduling: GFL = '+str(GFL) + ' Pipeline: '+str(PIPELINING))
 	else:
 		GFL = True
-	main()
+	return simulation()
+
+disable_print()
+if __name__ == '__main__':
+	# When the program is called as stand alone, print are enabled
+	enable_print()
+	main(sys.argv[1:])
