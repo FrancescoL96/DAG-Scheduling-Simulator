@@ -1033,7 +1033,6 @@ def simulation():
 		all_nodes_cpu.sort(key=lambda x: x.priority_point, reverse=False)
 		all_nodes_gpu.sort(key=lambda x: x.deadline, reverse=False)
 	else:
-		print(DEADLINE, GFL, HEFT, GFL_C)
 		all_nodes.sort(key=lambda x: x.heft_rank, reverse=True)	
 	
 	if (GFL_C):
@@ -1095,7 +1094,7 @@ def simulation():
 
 	if (SHOW_GRAPH):
 		scheduler.create_bar_graph(labels=GPU_labels + CPU_labels)
-
+	
 	return scheduler.max_time, str(scheduler.max_time)+' ('+str(round(scheduler.max_time/FRAMES, 2))+')'
 	
 # Disables stdout for prints
@@ -1108,6 +1107,10 @@ def enable_print():
 	
 def main(argv):
 	global GRAPH_FILE, DEADLINE, GFL, HEFT, GFL_C, FRAMES, PIPELINING, n_cpu
+	GFL = False
+	DEADLINE = False
+	GFL_C = False
+	HEFT = False
 	if (len(argv) == 5):
 		try:
 			GRAPH_FILE = argv[0]
@@ -1130,13 +1133,13 @@ def main(argv):
 	elif (len(argv) == 4):
 		try:
 			GRAPH_FILE = argv[0]
-			if int(argv[0]) == 1:
+			if int(argv[1]) == 1:
 				DEADLINE = True
-			elif int(argv[0]) == 0:
+			elif int(argv[1]) == 0:
 				GFL = True
-			elif int(argv[0]) == 2:
+			elif int(argv[1]) == 2:
 				HEFT = True
-			elif int(argv[0]) == 3:
+			elif int(argv[1]) == 3:
 				HEFT = True
 				GFL_C = True
 			FRAMES = int(argv[2])
@@ -1181,6 +1184,7 @@ def main(argv):
 			print('Usage: \n sim.py FILENAME[csv] DEADLINE(0,1) FRAMES(n)\nExample: open timings.csv, simulate three frames and use EDD without Pipeline\n\tsim.py graph_file.csv 1 3 0\nRunning with default settings: \n\tFile ' +str(GRAPH_FILE) + ' Frames: '+str(FRAMES) + ' Scheduling: GFL = '+str(GFL) + ' Pipeline: '+str(PIPELINING))
 	else:
 		GFL = True
+	
 	return simulation()
 
 disable_print()
