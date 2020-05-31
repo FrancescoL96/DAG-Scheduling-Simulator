@@ -11,6 +11,7 @@ PROCESSORS = float(n_cpu+n_gpu)	# Used in the formula to calculate priority poin
 DEADLINE = False # If set to true it will schedule using EDD 						!!! (can be overridden with program parameters)
 GFL = False # If set to true it will schedule using G-FL (CPU only) 				!!! (can be overridden with program parameters)
 HEFT = False # If set to true it will schedule using HEFT 							!!! (can be overridden with program parameters)
+GFL_C = False # If set to true it will use HEFT mapping and schedule with G-FL		!!! (can be overridden with program parameters)
 PIPELINING = False # If set to true it will enable pipelining						!!! (can be overridden with program parameters)
 FRAMES = 3 # Number of frames to simulate, defualt is 3								!!! (can be overridden with program parameters)
 MAXIMUM_PIPELINING_ATTEMPTS = 100
@@ -93,15 +94,16 @@ class Node:
 		requirements_str = ''
 		for node in self.requirements:
 			requirements_str += node.name + '_' + str(node.level) + '_' + str(node.execution) + (' S ' if node.scheduled_time != -1 else ' NS ')
-		return '---------------------------\n' + self.name + '_' + str(self.level) + '_' + str(self.execution) + str(' GPU' if self.is_gpu else ' CPU') + '\nDelay: ' + str(round(self.delay, 2)) + (' Scheduled on CPU: '+str(self.scheduled_on_cpu) if self.scheduled_on_cpu != -1 else ' Scheduled on GPU: '+str(self.scheduled_on_gpu)) + '\nRequires: ' + requirements_str + later + '\n---------------------------'
+		return '---------------------------\n' + self.name + '_' + str(self.level) + '_' + str(self.execution) + str(' GPU' if self.is_gpu else ' CPU') + '\nDelay: ' + str(round(self.delay, 2)) + (' Scheduled on GPU: '+str(self.scheduled_on_gpu) if self.is_gpu else ' Scheduled on CPU: '+str(self.scheduled_on_cpu)) + '\nRequires: ' + requirements_str + later + '\n---------------------------'
 	
 # This class creates and verifies the scheduling, prints the scheduling only if it is verified
 class Schedule:
 	'''
 	__init__
-	set_starting_points
+	create_queues
 	create_schedule
 	create_schedule_HEFT
+	create_schedule_GFL_C
 	verify_scheduling
 	pipeline
 	error_function
@@ -113,7 +115,7 @@ class Schedule:
 	create_bar_graph
 	'''
 	# Takes as parameter a list of all nodes ordered by priority and execution, separeted between CPU and GPU nodes
-	def __init__(self, node_list_cpu, node_list_gpu, n_cpu, n_gpu):
+	def __init__(self, starting_points, node_list_cpu, node_list_gpu, n_cpu, n_gpu):
 		self.node_list_cpu = node_list_cpu
 		self.node_list_gpu = node_list_gpu
 		self.verified = False # A schedule is verified if the nodes in the current schedule meet all dependencies
@@ -126,10 +128,13 @@ class Schedule:
 		self.available_gpu = [[] for i in range(0, FRAMES)]
 		# Always starts from frame zero
 		self.current_frame = 0
+		# Starting points
+		self.starting_points = starting_points
+		self.create_queues()
 	
 	# The nodes which have no dependencies are added to their respective ready queues
-	def set_starting_points(self, starting_points):
-		for node in starting_points:
+	def create_queues(self):
+		for node in self.starting_points:
 			for frame in range(0, FRAMES):
 				if node.execution == frame:
 					# If we are working with HEFT all the nodes are added to the CPU queue, as we need just one with HEFT (mapping is done automatically)
@@ -150,7 +155,7 @@ class Schedule:
 		# Run while there are nodes that can run
 		# This while takes advantage of lazy expression evaluation to avoid index out of bounds
 		while self.current_frame < FRAMES and (self.available_gpu[self.current_frame] or self.available_cpu[self.current_frame]):
-			# The processor with the earliest time goes first			
+			# The processor with the earliest time goes first
 			if ((min(times_gpu, key=lambda x: x[-1][1])[-1][1]+(self.available_gpu[self.current_frame][0].time_gpu if self.available_gpu[self.current_frame] else 0) <= min(times_cpu, key=lambda x: x[-1][1])[-1][1]+(self.available_cpu[self.current_frame][0].time_cpu if self.available_cpu[self.current_frame] else 0) and self.available_gpu[self.current_frame]) or not self.available_cpu[self.current_frame]):
 				# If there are nodes available for a GPU
 				if (self.available_gpu[self.current_frame]):
@@ -167,9 +172,9 @@ class Schedule:
 								if req.scheduled_time > required.scheduled_time:
 									required = req
 					if (node.scheduled_time != -1):
-						min_time_gpu = [50000, -1]
+						min_time_gpu = [9999999999, -1]
 						# If the requirements is the last run node, we schedule the current node on the same processor (instead of creating a delay)
-						if required != None and required.is_gpu and execution_elements_gpu[required.scheduled_on_gpu][-1] == required:
+						if required != None and required.is_gpu and execution_elements_gpu[required.scheduled_on_gpu][-1] == required and required.scheduled_time != -1:
 							min_time_gpu[0] = [times_gpu[required.scheduled_on_gpu]][-1][1]
 							min_time_gpu[1] = required.scheduled_on_gpu
 						# Adds this node to the GPU with the smallest current time
@@ -237,8 +242,8 @@ class Schedule:
 								if req.scheduled_time > required.scheduled_time:
 									required = req
 					if (node.scheduled_time != -1):
-						min_time_cpu = [50000, -1]
-						if required != None and not required.is_gpu and execution_elements_cpu[required.scheduled_on_cpu][-1] == required:
+						min_time_cpu = [9999999999, -1]
+						if required != None and not required.is_gpu and execution_elements_cpu[required.scheduled_on_cpu][-1] == required and required.scheduled_time != -1:
 							min_time_cpu[0] = [times_cpu[required.scheduled_on_cpu]][-1][1]
 							min_time_cpu[1] = required.scheduled_on_cpu
 						else:
@@ -246,7 +251,7 @@ class Schedule:
 								if min_time_cpu[0] > cpu[-1][1]:
 									min_time_cpu[0] = cpu[-1][1]
 									min_time_cpu[1] = times_cpu.index(cpu)
-									
+						
 						# For fake Pipelining improvements, remove from here ->
 						if node.scheduled_time - (times_cpu[min_time_cpu[1]][-1][1] if node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] > 0 else 0) > 0:
 							for i in range(1, len(self.available_cpu[self.current_frame])):
@@ -260,12 +265,13 @@ class Schedule:
 								else:
 									attempt_early_start_node.scheduled_time = -1
 						# <- to here
-
+						
 						execution_elements_cpu[min_time_cpu[1]].append(node)
 						node.delay = node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] if node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] > 0 else 0
 						node.scheduled_time = round(times_cpu[min_time_cpu[1]][-1][1] + node.delay, 2)
 						times_cpu[min_time_cpu[1]].append((round(node.scheduled_time, 2), round(node.scheduled_time + node.time_cpu + node.copy_time, 2)))
 						node.scheduled_on_cpu = min_time_cpu[1]
+						
 						for next in node.required_by:
 							append = True
 							for check in next.requirements:
@@ -331,8 +337,8 @@ class Schedule:
 
 			# If the selected node has a minimum start time set by "set_minimum_start_time" we continue (it should always be set, it is still checked)
 			if (node.scheduled_time != -1):
-				min_time_cpu = [50000, -1]
-				min_time_gpu = [50000, -1]
+				min_time_cpu = [9999999999, -1]
+				min_time_gpu = [9999999999, -1]
 				# If the node has a CPU time, we take the processor with the earliest start time
 				if (node.time_cpu != -1):
 					for cpu in times_cpu:
@@ -441,6 +447,47 @@ class Schedule:
 			ce.sort(key=lambda x: x.scheduled_time)
 		
 		return self.verify_scheduling(times)
+
+	def create_schedule_GFL_C(self):
+		global HEFT, PIPELINING
+		# Firstly we schedule the nodes using HEFT, this is is a necessary step to create the mapping
+		old_pipe = PIPELINING
+		PIPELINING = False
+		self.create_schedule_HEFT()
+		PIPELINING = old_pipe
+		# We also reset the CPU/GPU node lists
+		self.node_list_cpu = []
+		self.node_list_gpu = []
+		# node_list now contains all the nodes, scheduled for each processor using HEFT, we keep the mapping (node.is_gpu) and remove all the nodes
+		for processor in self.node_list:
+			for node in processor:
+				# For each node we reset all the scheduling values
+				node.scheduled_time = -1
+				node.scheduled_on_cpu = -1
+				node.scheduled_on_gpu = -1
+				# Each node gets added to the respective queue depending on processor type
+				if node.is_gpu:
+					self.node_list_gpu.append(node)
+				else: 
+					self.node_list_cpu.append(node)		
+		self.node_list = []
+		# Removes HEFT flag to avoid conflicts
+
+		HEFT = False
+		# Recalculates deadlines and priority points with the HEFT mapping
+		EDD_auto(self.starting_points)
+		normalize_deadlines(self.node_list_cpu + self.node_list_gpu)
+		calculate_priority_points(self.node_list_cpu + self.node_list_gpu)
+		# The nodes are sorted again based on their priority points
+		self.node_list_cpu.sort(key=lambda x: x.priority_point, reverse=False)
+		self.node_list_gpu.sort(key=lambda x: x.deadline, reverse=False)
+		
+		# Rebuilds ready queues
+		self.create_queues()
+		# Resets the frame counter
+		self.current_frame = 0
+		
+		return self.create_schedule()
 		
 	# This function verifies if all dependencies in the scheduling are respected (done after the scheduling and pipelining)
 	def verify_scheduling(self, times):
@@ -476,7 +523,15 @@ class Schedule:
 	def pipeline(self, execution_elements_cpu, execution_elements_gpu, times_cpu, times_gpu):
 		# Calculates how much time was spent idle for all processors
 		self.max_time_pipelining = round(max(times_cpu+times_gpu, key=lambda x: x[-1][1])[-1][1], 2)
-		print('Makespan pre-pipelining: ' + str(self.max_time_pipelining))
+		if (DEADLINE):
+			print('Makespan EDD:', end=' ')
+		elif (GFL):
+			print('Makespan G-FL:', end=' ')
+		elif (HEFT):
+			print('Makespan HEFT:', end=' ')
+		elif (GFL_C):
+			print('Makespan G-FL custom: ', end=' ')
+		print(self.max_time_pipelining)
 		print('Idle times before pipelining: ')
 		total_time = self.calculate_idle_time(times_cpu)
 		total_time += self.calculate_idle_time(times_gpu, is_gpu=True)
@@ -498,7 +553,15 @@ class Schedule:
 		# Calculates idle times again to see what kind of improvement is obtained from pipelining
 		total_time_old = total_time
 		if (PIPELINING):
-			print('Makespan post-pipelining: ' + str(round(max(times_cpu+times_gpu, key=lambda x: x[-1][1])[-1][1], 2)) + ' ('+str(round((self.max_time_pipelining/round(max(times_cpu+times_gpu, key=lambda x: x[-1][1])[-1][1], 2)-1)*100, 2))+'%)')
+			if (DEADLINE):
+				print('Makespan EDD', end=' ')
+			elif (GFL):
+				print('Makespan G-FL', end=' ')
+			elif (HEFT):
+				print('Makespan HEFT', end=' ')
+			elif (GFL_C):
+				print('Makespan G-FL custom', end=' ')
+			print('post-pipelining: ' + str(round(max(times_cpu+times_gpu, key=lambda x: x[-1][1])[-1][1], 2)) + ' ('+str(round((self.max_time_pipelining/round(max(times_cpu+times_gpu, key=lambda x: x[-1][1])[-1][1], 2)-1)*100, 2))+'%)')
 			self.max_time_pipelining = round(max(times_cpu+times_gpu, key=lambda x: x[-1][1])[-1][1], 2)
 			print('Idle times after pipelining: ')
 			total_time = self.calculate_idle_time(times_cpu)
@@ -797,7 +860,11 @@ def EDD_auto_rec(leaf):
 # Normalizes priorities by summing the lowest value (as they are all negativs)
 def normalize_deadlines(all_nodes_exec):
 		# Normalizes from earliest deadline negative, to earliest deadline zero
-		min_deadline = MINIMUM_FRAME_DELAY
+		min_deadline = 0
+		for node in all_nodes_exec:
+			if min_deadline > node.deadline:
+				min_deadline = node.deadline
+		min_deadline *= -1.0
 		for node in all_nodes_exec:
 			node.deadline += min_deadline
 			
@@ -869,6 +936,7 @@ def import_graph():
 						node_list[key_node[0], key_node[1], frame].requirements.append(node_list[key_dep[0], key_node[1]+key_dep[1], frame])
 					elif (key_node[1]+key_dep[1] >= 0 and key_node[1]+key_dep[1] > node_max_level[key_dep[0]] and node_list[key_dep[0], node_max_level[key_dep[0]], frame] not in node_list[key_node[0], key_node[1], frame].requirements):
 						node_list[key_node[0], key_node[1], frame].requirements.append(node_list[key_dep[0], node_max_level[key_dep[0]], frame])
+	
 	# Following the VisionWork policy, we always use the fastest implementation for the mapping (even if it creates imbalance between processors)
 	for key in node_list:
 		if (node_list[key].time_gpu != -1 and node_list[key].time_cpu != -1):
@@ -912,11 +980,13 @@ def calculate_start_points(node_list):
 # Adds dependencies to start nodes so that no frame can start before the earlier frame
 def add_cross_dependencies_between_frames(node_list, start_points, end_points):
 	start_points.sort(key = lambda x: x.execution)
-	end_points.sort(key = lambda x: x.execution)
+	#end_points.sort(key = lambda x: x.execution)
 	for frame in range(1, FRAMES):
-		for i in range(1, len(start_points)):
-			if start_points[i-1] not in start_points[i].requirements:
-				start_points[i].requirements.append(start_points[i-1])
+		for node in start_points:
+			for node_next_frame in start_points:
+				if node.execution == node_next_frame.execution - 1:
+					node_next_frame.requirements.append(node)
+					
 		
 def simulation():
 	node_list = import_graph()
@@ -963,33 +1033,38 @@ def simulation():
 		all_nodes_cpu.sort(key=lambda x: x.priority_point, reverse=False)
 		all_nodes_gpu.sort(key=lambda x: x.deadline, reverse=False)
 	else:
+		print(DEADLINE, GFL, HEFT, GFL_C)
 		all_nodes.sort(key=lambda x: x.heft_rank, reverse=True)	
 	
-	if (HEFT):
+	if (GFL_C):
 		all_nodes.sort(key=lambda x: x.execution, reverse=False)
-		scheduler = Schedule(all_nodes, [], n_cpu, n_gpu)
-		scheduler.set_starting_points(start_points)
+		scheduler = Schedule(start_points, all_nodes, [], n_cpu, n_gpu)
+		max_time = scheduler.create_schedule_GFL_C()
+	elif (HEFT):
+		all_nodes.sort(key=lambda x: x.execution, reverse=False)
+		scheduler = Schedule(start_points, all_nodes, [], n_cpu, n_gpu)
 		max_time = scheduler.create_schedule_HEFT()
 	else:
 		# Sort all nodes using a stable algorithm by execution (if they have the same priority the earlier executions go first)
 		all_nodes_cpu.sort(key=lambda x: x.execution, reverse=False)
 		all_nodes_gpu.sort(key=lambda x: x.execution, reverse=False)
-		scheduler = Schedule(all_nodes_cpu, all_nodes_gpu, n_cpu, n_gpu)
-		scheduler.set_starting_points(start_points)
+		scheduler = Schedule(start_points, all_nodes_cpu, all_nodes_gpu, n_cpu, n_gpu)
 		max_time = scheduler.create_schedule()
 	
 	if (DEADLINE):
 		print('Makespan EDD: ', end=' ')
 	elif (GFL):
 		print('Makespan G-FL: ', end=' ')
-	else:
+	elif (HEFT):
 		print('Makespan HEFT: ', end=' ')
+	elif (GFL_C):
+		print('Makespan G-FL custom: ', end=' ')
 	print(str(max_time) + ' ('+str(round(max_time/FRAMES, 2))+')')
 
 	GPU_labels = ['GPU '+str(i) for i in range(n_gpu-1, -1, -1)]
 	CPU_labels = ['CPU '+str(i) for i in range(n_cpu-1, -1, -1)]
 	
-	if (not HEFT):
+	if (not HEFT and not GFL_C):
 		all_nodes = all_nodes_cpu + all_nodes_gpu
 	
 	# Here at the end are calculated for all tasks average lateness, max lateness, and also exact frame time
@@ -1032,7 +1107,7 @@ def enable_print():
     sys.stdout = sys.__stdout__
 	
 def main(argv):
-	global GRAPH_FILE, DEADLINE, GFL, HEFT, FRAMES, PIPELINING, n_cpu
+	global GRAPH_FILE, DEADLINE, GFL, HEFT, GFL_C, FRAMES, PIPELINING, n_cpu
 	if (len(argv) == 5):
 		try:
 			GRAPH_FILE = argv[0]
@@ -1040,22 +1115,30 @@ def main(argv):
 				DEADLINE = True
 			elif int(argv[1]) == 0:
 				GFL = True
-			else:
+			elif int(argv[1]) == 2:
 				HEFT = True
+			elif int(argv[1]) == 3:
+				HEFT = True
+				GFL_C = True
 			FRAMES = int(argv[2])
 			PIPELINING = bool(int(argv[3]))
 			n_cpu = int(argv[4]) if int(argv[4]) <= 5 else 5
-		except:
-			print('Error (Using 5 args input mode)')
+			if n_cpu <= 0:
+				n_cpu = 1
+		except Exception as err:
+			print('Error (Using 5 args input mode)\n', err)
 	elif (len(argv) == 4):
 		try:
 			GRAPH_FILE = argv[0]
-			if int(argv[1]) == 1:
+			if int(argv[0]) == 1:
 				DEADLINE = True
-			elif int(argv[1]) == 0:
+			elif int(argv[0]) == 0:
 				GFL = True
-			else:
+			elif int(argv[0]) == 2:
 				HEFT = True
+			elif int(argv[0]) == 3:
+				HEFT = True
+				GFL_C = True
 			FRAMES = int(argv[2])
 			PIPELINING = bool(int(argv[3]))
 		except:
@@ -1067,8 +1150,11 @@ def main(argv):
 				DEADLINE = True
 			elif int(argv[0]) == 0:
 				GFL = True
-			else:
+			elif int(argv[0]) == 2:
 				HEFT = True
+			elif int(argv[0]) == 3:
+				HEFT = True
+				GFL_C = True
 			FRAMES = int(argv[1])
 			PIPELINING = bool(int(argv[2]))
 		except:
@@ -1080,7 +1166,10 @@ def main(argv):
 				DEADLINE = True
 			elif int(argv[0]) == 0:
 				GFL = True
-			else:
+			elif int(argv[0]) == 2:
+				HEFT = True
+			elif int(argv[0]) == 3:
+				GFL_C = True
 				HEFT = True
 			FRAMES = int(argv[1])
 		except:
@@ -1096,6 +1185,6 @@ def main(argv):
 
 disable_print()
 if __name__ == '__main__':
-	# When the program is called as stand alone, print are enabled
+	# When the program is called as stand alone, prints are enabled
 	enable_print()
 	main(sys.argv[1:])
