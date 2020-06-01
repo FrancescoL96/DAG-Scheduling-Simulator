@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from decimal import Decimal, ROUND_HALF_EVEN
 
-GRAPH_FILE = 'orb_graph.csv' # File to import the graph							!!! (can be overridden with program parameters)
-n_cpu = 2
+GRAPH_FILE = 'orb_graph.csv' # File to import the graph								!!! (can be overridden with program parameters)
+n_cpu = 2 #																			!!! (can be overridden with program parameters)
 n_gpu = 1
 PROCESSORS = float(n_cpu+n_gpu)	# Used in the formula to calculate priority points for G-FL
 DEADLINE = False # If set to true it will schedule using EDD 						!!! (can be overridden with program parameters)
@@ -1107,10 +1107,14 @@ def enable_print():
 	
 def main(argv):
 	global GRAPH_FILE, DEADLINE, GFL, HEFT, GFL_C, FRAMES, PIPELINING, n_cpu
+	# In case this is getting used as a module for simulations, then all global parameters are reset for the next execution
 	GFL = False
 	DEADLINE = False
 	GFL_C = False
 	HEFT = False
+	n_cpu = 2
+	PIPELINING = False
+	FRAMES = 3
 	if (len(argv) == 5):
 		try:
 			GRAPH_FILE = argv[0]

@@ -107,15 +107,15 @@ def tree_generator(depth, last_generated_node):
 		
 def main(argv):
 	global SET
-	SET = argv[0]
+	SET = int(argv[0])
 	if (len(argv) == 2):
-		tree_generator(argv[1], last_generated_node)
+		tree_generator(int(argv[1]), last_generated_node)
 	elif (len(argv) == 3):
 		SET = argv[0]
-		linear_generator(argv[1], argv[2])
-	if os.path.exists('gen_graph.csv'):
-		os.remove('gen_graph.csv')
-	with open('gen_graph.csv', 'w') as output:
+		linear_generator(int(argv[1]), int(argv[2]))
+	if os.path.exists('gen_graphz.csv'):
+		os.remove('gen_graphz.csv')
+	with open('gen_graphz.csv', 'w') as output:
 		output.write(graph)
 
 if __name__ == '__main__':

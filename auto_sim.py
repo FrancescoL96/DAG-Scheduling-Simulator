@@ -1,6 +1,7 @@
 import sim as simulator
 import generator
 from shutil import copyfile
+from importlib import reload
 
 SETS = 3
 SIZES_LINEAR = [4, 7]
@@ -11,17 +12,23 @@ SCHEDULER = 3
 SCHEDULER_COMP = 2
 
 avg_res = {}
+# Maximum Pipeline improvement
 max_res = 0.0
+# Maximum improvement from SCHEDULER_COMP to SCHEDULER
+max_res_comp = 0.0
+# Maximum improvement from SCHEDULER_COMP (pipe) to SCHEDULER (pipe)
+max_res_comp_pipe = 0.0
 
-counter = 0
+counter = 0 # Used when copying graphs that show greater than 25% improvement for pipelining
 
-RUNS = 5
+RUNS = 3
 
 for run in range(RUNS):
 	simulator.enable_print()
 	print('RUN', run)
 	simulator.disable_print()
 	for set in range(0, SETS):
+		simulator = reload(simulator) # This is a possible fix to performance degradation due to constantly reusing the same object
 		simulator.enable_print()
 		print('SET', set)
 		simulator.disable_print()
@@ -61,6 +68,12 @@ for run in range(RUNS):
 							
 							if max_res < round(((time/time_pipe)-1.0)*100, 2):
 								max_res = round(((time/time_pipe)-1.0)*100, 2)
+								
+							if max_res_comp < round(((comp_time/time)-1.0)*100, 2):
+								max_res_comp = round(((comp_time/time)-1.0)*100, 2)
+								
+							if max_res_comp_pipe < round(((comp_time_pipe/time_pipe)-1.0)*100, 2):
+								max_res_comp_pipe = round(((comp_time_pipe/time_pipe)-1.0)*100, 2)
 								
 						simulator.enable_print()
 						print(output_line)
@@ -118,4 +131,6 @@ for key in avg_res:
 	simulator.enable_print()
 	print(str(key), round(avg_res[key][0]/RUNS, 2), round(avg_res[key][1]/RUNS, 2), round(avg_res[key][2]/RUNS, 2))
 
-print('Max', max_res)
+print('Max pipe improvement', max_res)
+print('Max improvement from SCHEDULER_COMP to SCHEDULER', max_res_comp)
+print('Max improvement from SCHEDULER_COMP (pipe) to SCHEDULER (pipe)', max_res_comp_pipe)
