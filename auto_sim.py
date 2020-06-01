@@ -1,11 +1,10 @@
 import sim as simulator
 import generator
 from shutil import copyfile
-from importlib import reload
 
 SETS = 3
-SIZES_LINEAR = [4, 7]
-DEPTH_TREE = [4]
+SIZES_LINEAR = [4, 7, 10]
+DEPTH_TREE = [4, 5, 6, 7]
 
 # 0 for G-FL, 1 for EDD, 2 for HEFT and 3 for G-FL_C
 SCHEDULER = 3
@@ -28,13 +27,12 @@ for run in range(RUNS):
 	print('RUN', run)
 	simulator.disable_print()
 	for set in range(0, SETS):
-		simulator = reload(simulator) # This is a possible fix to performance degradation due to constantly reusing the same object
 		simulator.enable_print()
 		print('SET', set)
 		simulator.disable_print()
 		for DEPTH in range(len(SIZES_LINEAR)):
-			for HEIGHT in range(1, len(SIZES_LINEAR)):
-				generator.main([set, SIZES_LINEAR[HEIGHT], SIZES_LINEAR[HEIGHT]])
+			for HEIGHT in range(len(SIZES_LINEAR)):
+				generator.main([set, SIZES_LINEAR[HEIGHT], SIZES_LINEAR[DEPTH]])
 				simulator.enable_print()
 				print('----------------------------------')
 				simulator.disable_print()
