@@ -106,16 +106,20 @@ def tree_generator(depth, last_generated_node):
 		tree_generator(depth - 1, cur_node_name)
 		
 def main(argv):
-	global SET
+	global SET, graph, first_node_last_row, last_generated_node, next_node_name
+	graph = 'a,1,0.0001,-1,0'
+	first_node_last_row = 'a'
+	last_generated_node = 'a'
+	next_node_name = 'b'
 	SET = int(argv[0])
 	if (len(argv) == 2):
-		tree_generator(int(argv[1]), last_generated_node)
+		tree_generator(int(argv[1]) - 1, last_generated_node)
 	elif (len(argv) == 3):
-		SET = argv[0]
+		SET = int(argv[0])
 		linear_generator(int(argv[1]), int(argv[2]))
-	if os.path.exists('gen_graphz.csv'):
-		os.remove('gen_graphz.csv')
-	with open('gen_graphz.csv', 'w') as output:
+	if os.path.exists('gen_graph.csv'):
+		os.remove('gen_graph.csv')
+	with open('gen_graph.csv', 'w') as output:
 		output.write(graph)
 
 if __name__ == '__main__':
