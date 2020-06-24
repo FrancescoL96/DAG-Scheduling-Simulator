@@ -4,11 +4,11 @@ from shutil import copyfile
 
 SETS = 3
 SIZES_LINEAR = [4, 7, 10]
-DEPTH_TREE = [4, 5, 6, 7]
+DEPTH_TREE = [4, 5, 6]
 
 # 0 for G-FL, 1 for EDD, 2 for HEFT and 3 for G-FL_C
-SCHEDULER = 3
-SCHEDULER_COMP = 2
+SCHEDULER = 0
+SCHEDULER_COMP = 3
 
 avg_res = {}
 # Maximum Pipeline improvement
@@ -18,9 +18,9 @@ max_res_comp = 0.0
 # Maximum improvement from SCHEDULER_COMP (pipe) to SCHEDULER (pipe)
 max_res_comp_pipe = 0.0
 
-counter = 0 # Used when copying graphs that show greater than 25% improvement for pipelining
+RUNS = 10
 
-RUNS = 3
+counter = 0
 
 for run in range(RUNS):
 	simulator.enable_print()
@@ -33,6 +33,7 @@ for run in range(RUNS):
 		for DEPTH in range(len(SIZES_LINEAR)):
 			for HEIGHT in range(len(SIZES_LINEAR)):
 				generator.main([set, SIZES_LINEAR[HEIGHT], SIZES_LINEAR[DEPTH]])
+				counter += 1
 				simulator.enable_print()
 				print('----------------------------------')
 				simulator.disable_print()
@@ -40,6 +41,10 @@ for run in range(RUNS):
 				temp_sum_comp = 0
 				temp_sum_comp_pipe = 0
 				temp_count = 0
+				temp_sum_2_cpu = 0
+				temp_sum_5_cpu = 0
+				temp_count_2_cpu = 0
+				temp_count_5_cpu = 0
 				for CPU_cores in range (2, 6):
 					for FRAMES in range(1, 6, 2):
 						comp_time, output = simulator.main(['gen_graph.csv', SCHEDULER_COMP, FRAMES, 0, CPU_cores])
@@ -54,12 +59,19 @@ for run in range(RUNS):
 						if (FRAMES != 1):
 							time_pipe, output = simulator.main(['gen_graph.csv', SCHEDULER, FRAMES, 1, CPU_cores])
 							if round(((time/time_pipe)-1.0)*100, 2) >= 25.0:
-								copyfile('gen_graph.csv', './graph25+/gen_graph'+str(counter)+'.csv')
-								counter += 1
+								copyfile('gen_graph.csv', './graph25+/gen_graph-Sc_'+str(SCHEDULER)+'-Set_'+str(set)+'-F_'+str(FRAMES)+'-CPU_'+str(CPU_cores)+'-'+str(int(((time/time_pipe)-1.0)*100))+'%_'+str(counter)+'.csv')
 								
 							output_line += '\tPIPE (%): '+ str(round(((time/time_pipe)-1.0)*100, 2)) + '%\t' + output
 							
-							temp_sum += round(((time/time_pipe)-1.0)*100, 2)							
+							temp_sum += round(((time/time_pipe)-1.0)*100, 2)
+							
+							if (CPU_cores == 2):
+								temp_sum_2_cpu += round(((time/time_pipe)-1.0)*100, 2)
+								temp_count_2_cpu += 1
+							if (CPU_cores == 5):
+								temp_sum_5_cpu += round(((time/time_pipe)-1.0)*100, 2)
+								temp_count_5_cpu += 1
+								
 							temp_sum_comp += round(((comp_time/time)-1.0)*100, 2)
 							temp_sum_comp_pipe += round(((comp_time_pipe/time_pipe)-1.0)*100, 2)
 							temp_count += 1
@@ -77,12 +89,13 @@ for run in range(RUNS):
 						print(output_line)
 						simulator.disable_print()						
 				if 'Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')' in avg_res.keys():
-					avg_res['Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')'] = (avg_res['Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')'][0] + round(temp_sum/temp_count, 2), avg_res['Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')'][1] + round(temp_sum_comp/temp_count, 2), avg_res['Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')'][2] + round(temp_sum_comp_pipe/temp_count, 2))
+					avg_res['Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')'] = (avg_res['Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')'][0] + round(temp_sum/temp_count, 2), avg_res['Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')'][1] + round(temp_sum_comp/temp_count, 2), avg_res['Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')'][2] + round(temp_sum_comp_pipe/temp_count, 2), avg_res['Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')'][3] + round(temp_sum_2_cpu/temp_count_2_cpu, 2), avg_res['Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')'][4] + round(temp_sum_5_cpu/temp_count_5_cpu, 2))
 				else:
-					avg_res['Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')'] = (round(temp_sum/temp_count, 2), round(temp_sum_comp/temp_count, 2), round(temp_sum_comp_pipe/temp_count, 2))
+					avg_res['Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')'] = (round(temp_sum/temp_count, 2), round(temp_sum_comp/temp_count, 2), round(temp_sum_comp_pipe/temp_count, 2), round(temp_sum_2_cpu/temp_count_2_cpu, 2), round(temp_sum_5_cpu/temp_count_5_cpu, 2))
 
 		for DEPTH in range(len(DEPTH_TREE)):
 			generator.main([set, DEPTH_TREE[DEPTH]])
+			counter += 1
 			simulator.enable_print()
 			print('----------------------------------')
 			simulator.disable_print()
@@ -90,6 +103,10 @@ for run in range(RUNS):
 			temp_sum_comp = 0
 			temp_sum_comp_pipe = 0
 			temp_count = 0
+			temp_sum_2_cpu = 0
+			temp_sum_5_cpu = 0
+			temp_count_2_cpu = 0
+			temp_count_5_cpu = 0
 			for CPU_cores in range (2, 6):
 				for FRAMES in range(1, 6, 2):				
 					comp_time, output = simulator.main(['gen_graph.csv', SCHEDULER_COMP, FRAMES, 0, CPU_cores])
@@ -104,12 +121,19 @@ for run in range(RUNS):
 					if (FRAMES != 1):
 						time_pipe, output = simulator.main(['gen_graph.csv', SCHEDULER, FRAMES, 1, CPU_cores])
 						if round(((time/time_pipe)-1.0)*100, 2) >= 25.0:
-							copyfile('gen_graph.csv', './graph25+/gen_graph'+str(counter)+'.csv')
-							counter += 1
+							copyfile('gen_graph.csv', './graph25+/gen_graph-Sc_'+str(SCHEDULER)+'-Set_'+str(set)+'-F_'+str(FRAMES)+'-CPU_'+str(CPU_cores)+'-'+str(int(((time/time_pipe)-1.0)*100))+'%_'+str(counter)+'.csv')
 							
 						output_line += '\tPIPE (%): '+ str(round(((time/time_pipe)-1.0)*100, 2)) + '%\t' + output
 						
 						temp_sum += round(((time/time_pipe)-1.0)*100, 2)
+						
+						if (CPU_cores == 2):
+							temp_sum_2_cpu += round(((time/time_pipe)-1.0)*100, 2)
+							temp_count_2_cpu += 1
+						if (CPU_cores == 5):
+							temp_sum_5_cpu += round(((time/time_pipe)-1.0)*100, 2)
+							temp_count_5_cpu += 1
+							
 						temp_sum_comp += round(((comp_time/time)-1.0)*100, 2)
 						temp_sum_comp_pipe += round(((comp_time_pipe/time_pipe)-1.0)*100, 2)
 						temp_count += 1
@@ -121,13 +145,13 @@ for run in range(RUNS):
 					print(output_line)
 					simulator.disable_print()
 			if 'Tree('+str(DEPTH_TREE[DEPTH])+')' in avg_res.keys():
-				avg_res['Tree('+str(DEPTH_TREE[DEPTH])+')'] = (avg_res['Tree('+str(DEPTH_TREE[DEPTH])+')'][0] + round(temp_sum/temp_count, 2), avg_res['Tree('+str(DEPTH_TREE[DEPTH])+')'][1] + round(temp_sum_comp/temp_count, 2), avg_res['Tree('+str(DEPTH_TREE[DEPTH])+')'][2] + round(temp_sum_comp_pipe/temp_count, 2))
+				avg_res['Tree('+str(DEPTH_TREE[DEPTH])+')'] = (avg_res['Tree('+str(DEPTH_TREE[DEPTH])+')'][0] + round(temp_sum/temp_count, 2), avg_res['Tree('+str(DEPTH_TREE[DEPTH])+')'][1] + round(temp_sum_comp/temp_count, 2), avg_res['Tree('+str(DEPTH_TREE[DEPTH])+')'][2] + round(temp_sum_comp_pipe/temp_count, 2), avg_res['Tree('+str(DEPTH_TREE[DEPTH])+')'][3] + round(temp_sum_2_cpu/temp_count_2_cpu, 2), avg_res['Tree('+str(DEPTH_TREE[DEPTH])+')'][4] + round(temp_sum_5_cpu/temp_count_5_cpu, 2))
 			else:
-				avg_res['Tree('+str(DEPTH_TREE[DEPTH])+')'] = (round(temp_sum/temp_count, 2), round(temp_sum_comp/temp_count, 2), round(temp_sum_comp_pipe/temp_count, 2))
+				avg_res['Tree('+str(DEPTH_TREE[DEPTH])+')'] = (round(temp_sum/temp_count, 2), round(temp_sum_comp/temp_count, 2), round(temp_sum_comp_pipe/temp_count, 2), round(temp_sum_2_cpu/temp_count_2_cpu, 2), round(temp_sum_5_cpu/temp_count_5_cpu, 2))
 		
 for key in avg_res:
 	simulator.enable_print()
-	print(str(key), round(avg_res[key][0]/RUNS, 2), round(avg_res[key][1]/RUNS, 2), round(avg_res[key][2]/RUNS, 2))
+	print(str(key), round(avg_res[key][0]/RUNS, 2), round(avg_res[key][1]/RUNS, 2), round(avg_res[key][2]/RUNS, 2), round(avg_res[key][3]/RUNS, 2), round(avg_res[key][4]/RUNS, 2))
 
 print('Max pipe improvement', max_res)
 print('Max improvement from SCHEDULER_COMP to SCHEDULER', max_res_comp)
