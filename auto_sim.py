@@ -7,8 +7,8 @@ SIZES_LINEAR = [4, 7, 10]
 DEPTH_TREE = [4, 5, 6]
 
 # 0 for G-FL, 1 for EDD, 2 for HEFT and 3 for G-FL_C
-SCHEDULER = 0
-SCHEDULER_COMP = 3
+SCHEDULER = 4
+SCHEDULER_COMP = 2
 
 avg_res = {}
 # Maximum Pipeline improvement
@@ -18,7 +18,7 @@ max_res_comp = 0.0
 # Maximum improvement from SCHEDULER_COMP (pipe) to SCHEDULER (pipe)
 max_res_comp_pipe = 0.0
 
-RUNS = 10
+RUNS = 3
 
 counter = 0
 
@@ -59,7 +59,7 @@ for run in range(RUNS):
 						if (FRAMES != 1):
 							time_pipe, output = simulator.main(['gen_graph.csv', SCHEDULER, FRAMES, 1, CPU_cores])
 							if round(((time/time_pipe)-1.0)*100, 2) >= 25.0:
-								copyfile('gen_graph.csv', './graph25+/gen_graph-Sc_'+str(SCHEDULER)+'-Set_'+str(set)+'-F_'+str(FRAMES)+'-CPU_'+str(CPU_cores)+'-'+str(int(((time/time_pipe)-1.0)*100))+'%_'+str(counter)+'.csv')
+								copyfile('gen_graph.csv', './graph25+/'+str(counter)+'_gen_graph_lin-Sc_'+str(SCHEDULER)+'-Set_'+str(set)+'-F_'+str(FRAMES)+'-CPU_'+str(CPU_cores)+'-'+str(int(((time/time_pipe)-1.0)*100))+'%.csv')
 								
 							output_line += '\tPIPE (%): '+ str(round(((time/time_pipe)-1.0)*100, 2)) + '%\t' + output
 							
@@ -121,7 +121,7 @@ for run in range(RUNS):
 					if (FRAMES != 1):
 						time_pipe, output = simulator.main(['gen_graph.csv', SCHEDULER, FRAMES, 1, CPU_cores])
 						if round(((time/time_pipe)-1.0)*100, 2) >= 25.0:
-							copyfile('gen_graph.csv', './graph25+/gen_graph-Sc_'+str(SCHEDULER)+'-Set_'+str(set)+'-F_'+str(FRAMES)+'-CPU_'+str(CPU_cores)+'-'+str(int(((time/time_pipe)-1.0)*100))+'%_'+str(counter)+'.csv')
+							copyfile('gen_graph.csv', './graph25+/'+str(counter)+'_gen_graph_tree-Sc_'+str(SCHEDULER)+'-Set_'+str(set)+'-F_'+str(FRAMES)+'-CPU_'+str(CPU_cores)+'-'+str(int(((time/time_pipe)-1.0)*100))+'%.csv')
 							
 						output_line += '\tPIPE (%): '+ str(round(((time/time_pipe)-1.0)*100, 2)) + '%\t' + output
 						

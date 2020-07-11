@@ -5,20 +5,21 @@ import matplotlib.patches as mpatches
 from decimal import Decimal, ROUND_HALF_EVEN
 
 GRAPH_FILE = 'orb_graph.csv' # File to import the graph								!!! (can be overridden with program parameters)
-n_cpu = 2 #																			!!! (can be overridden with program parameters)
+n_cpu = 0 #																			!!! (can be overridden with program parameters)
 n_gpu = 1
 PROCESSORS = float(n_cpu+n_gpu)	# Used in the formula to calculate priority points for G-FL
 DEADLINE = False # If set to true it will schedule using EDD 						!!! (can be overridden with program parameters)
 GFL = False # If set to true it will schedule using G-FL (CPU only) 				!!! (can be overridden with program parameters)
 HEFT = False # If set to true it will schedule using HEFT 							!!! (can be overridden with program parameters)
 GFL_C = False # If set to true it will use HEFT mapping and schedule with G-FL		!!! (can be overridden with program parameters)
+XEFT = False # If set to true it will use XEFT Clusters for HEFT ranks				!!! (can be overridden with program parameters)
 PIPELINING = False # If set to true it will enable pipelining						!!! (can be overridden with program parameters)
 FRAMES = 3 # Number of frames to simulate, defualt is 3								!!! (can be overridden with program parameters)
 MAXIMUM_PIPELINING_ATTEMPTS = 100
 MINIMUM_FRAME_DELAY = 33.33 # The minimum time between frames, 16ms is 60 fps, 33ms is 30 fps, 22ms is 45 fps
 
 # If set to False it will make ORB a CPU Only node
-ORB_GPU = True
+ORB_GPU = False
 
 # If set to True it will display a graph with the scheduling
 SHOW_GRAPH = False
@@ -74,6 +75,15 @@ class Node:
 			return self.time_cpu
 		else:
 			return self.time_gpu
+	
+	def max_time(self):
+		return max(self.time_cpu, self.time_gpu)
+	
+	# Checks if two nodes are the same node
+	def is_same_node(self, other_node):
+		if self.name == other_node.name and self.level == other_node.level and self.execution == other_node.execution:
+			return True
+		return False
 			
 	# If any data of a required node is on a different processor we need a copy
 	def check_copy(self):
@@ -90,7 +100,7 @@ class Node:
 		cpu_time = '\nfinishes at (cpu): ' + str(round(self.scheduled_time + self.time_cpu + self.copy_time, 2))
 		gpu_time = '\nfinishes at (gpu): ' + str(round(self.scheduled_time + self.time_gpu + self.copy_time, 2))
 		concat = (gpu_time if (self.is_gpu) else cpu_time) + ' (' + str(self.copy_time) + ')'
-		later = '\nis scheduled at time: '+str(round(self.scheduled_time, 2)) + concat + '\nPriority: ' + str(round(self.priority_point, 2)) + ' Deadline: '+str(round(self.deadline, 2))
+		later = '\nis scheduled at time: '+str(round(self.scheduled_time, 2)) + concat + '\nPriority: ' + str(round(self.priority_point, 2)) + ' Deadline: '+str(round(self.deadline, 2)) + " HEFT_rank: "+str(round(self.heft_rank, 2))
 		requirements_str = ''
 		for node in self.requirements:
 			requirements_str += node.name + '_' + str(node.level) + '_' + str(node.execution) + (' S ' if node.scheduled_time != -1 else ' NS ')
@@ -368,11 +378,16 @@ class Schedule:
 							# We check if running this node before the highest priority one would delay it, if not, we run this node
 							# We also need to check if this node has a GPU implementation before we can run it
 							if times_gpu[min_time_gpu[1]][-1][1] + delay_early_node + attempt_early_start_node.time_gpu + attempt_early_start_node.copy_time < node.scheduled_time and attempt_early_start_node.time_gpu != -1:
-								# This node is not currently scheduled so its time is reset
-								node.scheduled_time = -1
-								# The new node to schedule is this new one, that doesn't delay the current one
-								node = attempt_early_start_node
-								break
+								# If running the node on the GPU is the best option, then the node is scheduled
+								if attempt_early_start_node.time_cpu == -1 or (attempt_early_start_node.time_cpu != -1 and min_time_cpu[0] + attempt_early_start_node.time_cpu > min_time_gpu[0] + attempt_early_start_node.time_gpu):
+									# This node is not currently scheduled so its time is reset
+									node.scheduled_time = -1
+									# The new node to schedule is this new one, that doesn't delay the current one
+									node = attempt_early_start_node
+									break
+								else:
+									# If it is not the best option, then it is not scheduled
+									attempt_early_start_node.scheduled_time = -1
 							else:
 								# If it does delay, we reset the time and keep searching
 								attempt_early_start_node.scheduled_time = -1
@@ -401,9 +416,13 @@ class Schedule:
 							self.set_minimum_start_time(attempt_early_start_node)
 							delay_early_node = attempt_early_start_node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] if attempt_early_start_node.scheduled_time - times_cpu[min_time_cpu[1]][-1][1] > 0 else 0
 							if times_cpu[min_time_cpu[1]][-1][1] + delay_early_node + attempt_early_start_node.time_cpu + attempt_early_start_node.copy_time < node.scheduled_time and attempt_early_start_node.time_cpu != -1:
-								node.scheduled_time = -1
-								node = attempt_early_start_node
-								break
+								if attempt_early_start_node.time_gpu == -1 or (attempt_early_start_node.time_gpu != -1 and min_time_gpu[0] + attempt_early_start_node.time_gpu > min_time_cpu[0] + attempt_early_start_node.time_cpu):
+									node.scheduled_time = -1
+									node = attempt_early_start_node
+									break
+								else:
+									# If it is not the best option, then it is not scheduled
+									attempt_early_start_node.scheduled_time = -1
 							else:
 								attempt_early_start_node.scheduled_time = -1
 					
@@ -527,6 +546,8 @@ class Schedule:
 			print('Makespan EDD:', end=' ')
 		elif (GFL):
 			print('Makespan G-FL:', end=' ')
+		elif (XEFT):
+			print('Makespan XEFT:', end=' ')
 		elif (HEFT):
 			print('Makespan HEFT:', end=' ')
 		elif (GFL_C):
@@ -557,6 +578,8 @@ class Schedule:
 				print('Makespan EDD', end=' ')
 			elif (GFL):
 				print('Makespan G-FL', end=' ')
+			elif (XEFT):
+				print('Makespan XEFT', end=' ')
 			elif (HEFT):
 				print('Makespan HEFT', end=' ')
 			elif (GFL_C):
@@ -732,7 +755,7 @@ class Schedule:
 	# This function prints the Grantt graph of the scheduled nodes
 	# Supports any number of processors (more or less, zooming in and out might be required)
 	def create_bar_graph(self, labels):
-		distance = 13 - PROCESSORS
+		distance = 7 - PROCESSORS
 	
 		# If the scheduling is not verified it cannot be shown
 		if (not self.verified):
@@ -748,23 +771,25 @@ class Schedule:
 		grid_legend = mpatches.Patch(color='gold', label='grid')
 		fast_legend = mpatches.Patch(color='orange', label='fast')
 		dl_legend = mpatches.Patch(color='gray', label='dl')
-		super_legend = mpatches.Patch(color='red', label='Super')
-		name_legend = mpatches.Patch(color='white', label='initial_level_execution')
+		#super_legend = mpatches.Patch(color='red', label='Super')
+		name_legend = mpatches.Patch(color='white', label='level_frame')
 		
 		frame_lines, = plt.Line2D([0], [0], linestyle='-.', color='gray', alpha=0.5, lw=1, label='Frame times'),
 		finish_line, = plt.plot([self.max_time, self.max_time], [0,100], color='black', alpha=0.7, label='Finish time', linewidth=1)
 		
-		plt.legend(handles=[scale_legend, orb_legend, gauss_legend, grid_legend, fast_legend, dl_legend, super_legend, frame_lines, finish_line, name_legend], ncol=2)
+		#plt.legend(handles=[scale_legend, orb_legend, gauss_legend, grid_legend, fast_legend, dl_legend, super_legend, frame_lines, finish_line, name_legend], ncol=2)
+		plt.legend(handles=[scale_legend, orb_legend, gauss_legend, grid_legend, fast_legend, dl_legend, frame_lines, finish_line, name_legend], ncol=3)
 		
 		gnt.set_ylim(0, 50) 
 		gnt.set_xlim(0, self.max_time*1.05) 
 		gnt.set_xlabel('Milliseconds since start') 
 		gnt.set_ylabel('Processor')
 
-		gnt.set_yticks([distance+3+i*distance for i in range(0, len(labels))])
+		#gnt.set_yticks([distance+3+i*distance for i in range(0, len(labels))])
+		gnt.set_yticks([0.55+distance+i*distance for i in range(0, len(labels))])
 		gnt.set_yticklabels(labels) 
 		
-		gnt.yaxis.grid(True)
+		#gnt.yaxis.grid(True)
 		
 		bars = []
 		colors = []
@@ -778,7 +803,12 @@ class Schedule:
 			for node in computing_element:
 				if (node.execution >= 0):
 					#name.append(node.name[0]+'_'+str(node.level)+'_'+str(node.execution)+(' ('+str(node.priority_point)+')' if not node.is_gpu else ''))
-					name.append(node.name[0]+node.name[-1]+'_'+str(node.level)+'_'+str(node.execution))
+					#name.append(node.name[0]+node.name[-1]+'_'+str(node.level)+'_'+str(node.execution))
+					if node.time() >= 0.9:
+						name.append(str(node.level)+'_'+str(node.execution))
+						#name.append(node.name[1])
+					else:
+						name.append("")
 					bar.append((node.scheduled_time, node.time()))
 						
 					# Creating the actual color vectors
@@ -800,12 +830,14 @@ class Schedule:
 			names.append(name)
 			colors.append(color)
 		# Creates the broken bars, using the bars and color vectors
-		for i in range(0, len(bars)):				
-			gnt.broken_barh(bars[i], (distance*len(bars)-i*distance, 3), facecolors=tuple(colors[i]), edgecolor='white')
-		# Writes the names of the nodes separetly
+		for i in range(0, len(bars)):
+				gnt.broken_barh(bars[i], (distance*len(bars)-i*distance, 1.1), facecolors='white', edgecolor=tuple(colors[i]), linewidth=2)
+		# Writes the names of the nodes separetly'''
 		for i in range(0, len(bars)):	
 			for j in range(0, len(bars[i])):
-				gnt.text(x=bars[i][j][0]+bars[i][j][1]/2, y=(4)+distance*len(bars)-i*distance+(j%3), s=names[i][j], ha='center', va='center', color='black',)
+				#gnt.text(x=bars[i][j][0]+bars[i][j][1]/2, y=(2)+distance*len(bars)-i*distance+(j%3), s=names[i][j], ha='center', va='center', color='black',)
+				gnt.text(x=bars[i][j][0]+bars[i][j][1]/2, y=0.55+distance*len(bars)-i*distance, s=names[i][j], ha='center', va='center', color='black',)
+
 		# Adds the frame times line (skips frame zero, as that's the start of the graph)
 		for i in range(1, FRAMES):
 			plt.plot([i*MINIMUM_FRAME_DELAY,i*MINIMUM_FRAME_DELAY], [0,100], '-.', color='gray', alpha=0.5)
@@ -880,13 +912,13 @@ def HEFT_auto(leaves):
 
 def HEFT_auto_rec(leaf):
 	if (not leaf.required_by):
-		leaf.heft_rank = leaf.avg_time()
+		leaf.heft_rank = leaf.max_time()
 	else:
 		rank_candidates = []
 		for next in leaf.required_by:
 			HEFT_auto_rec(next)
 			rank_candidates.append(next.copy_time + next.heft_rank)
-		leaf.heft_rank = round(max(leaf.heft_rank, leaf.avg_time() + max(rank_candidates)), 2)
+		leaf.heft_rank = round(max(leaf.heft_rank, leaf.max_time() + max(rank_candidates)), 2)
 
 # Liv name(0) - Levels(1) - CPU times(2+levels) - GPU times(2+levels*2) - Copy times(2+levels*3) - (Dependencies, Level), ...
 # Imports the DAG from a file with this structure ^ (level for the dependencies is an offset, eg.: i'm node level X and i depend on X + Level from Dependency)
@@ -987,7 +1019,151 @@ def add_cross_dependencies_between_frames(node_list, start_points, end_points):
 				if node.execution == node_next_frame.execution - 1:
 					node_next_frame.requirements.append(node)
 					
-		
+# XEFT algorithm taken from DATE20 pubblication
+def build_cluster(node_list):
+	i = 0
+	while (i < len(node_list)):
+		cluster = []
+		node = node_list[i]
+		candidates = []
+		if node.time_cpu == -1 or node.time_gpu == -1:
+			if (node not in candidates):
+				candidates.append(node)
+			for j in range (i+1, len(node_list)):
+				node_j = node_list[j]
+				if node_j.time_cpu == -1 or node_j.time_gpu == -1:
+					for p in candidates:
+						if (not is_reachable(p, node_j)):
+							if (node_j not in candidates):
+								candidates.append(node_j)
+			cpu_time = 0
+			gpu_time = 0
+			cpu_candidates = []
+			gpu_candidates = []
+			for node_c in candidates:
+				if node_c.time_cpu != -1:
+					cpu_time += node_c.time_cpu
+					cpu_candidates.append(node_c)
+				if node_c.time_gpu != -1:
+					gpu_time += node_c.time_gpu
+					gpu_candidates.append(node_c)
+			if gpu_time < (cpu_time / n_cpu):
+				cluster = gpu_candidates
+				for node_c in cpu_candidates:
+					for cluster_node in cluster:
+						time = 0
+						if cluster_node.time_cpu != -1:
+							time += cluster_node.time_cpu
+						if abs(gpu_time - ((time+node_c.time_cpu)/n_cpu)) < abs(gpu_time - (time/n_cpu)):
+							if (node_c not in cluster):
+								cluster.append(node_c)
+					if (len(cluster) == 0):
+						cluster.append(node_c)
+			else:
+				cluster = cpu_candidates
+				for node_g in gpu_candidates:
+					for cluster_node in cluster:
+						time = 0
+						if cluster_node.time_gpu != -1:
+							time += cluster_node.time_gpu
+						if abs(cpu_time/n_cpu - time + node_g.time_gpu) < abs(cpu_time/n_cpu - time):
+							if (node_g not in cluster):
+								cluster.append(node_g)
+					if (len(cluster) == 0):
+						cluster.append(node_g)
+			if (len(cluster) > 1):
+				apply_rank(node_list, cluster)
+			i = node_list.index(cluster[-1]) + 1
+		else:
+			i += 1
+
+# Recursive reachability from node to node_to_reach
+def is_reachable(node, node_to_reach):
+	if node.is_same_node(node_to_reach):
+		return True
+	targets_found = []
+	targets_found.append(0)
+	# Variable targets_found is used as an output parameter
+	is_reachable_ric(node, node_to_reach, [], targets_found)
+	if (targets_found[0] > 0):
+		return True
+	return False
+
+def is_reachable_ric(node, node_to_reach, visited, targets_found):
+	for req in node.required_by:
+		if (req not in visited):
+			visited.append(req)
+			if req.is_same_node(node_to_reach):
+				targets_found[0] += 1
+				return 
+			else:
+				is_reachable_ric(req, node_to_reach, visited, targets_found)
+			
+def apply_rank(node_list, cluster):
+	i = 0
+	clustered_nodes = []
+	while (i < len(cluster) - 1):
+		node_down = cluster[i]
+		node_up = cluster[i+1]
+		# MOVE UP lowest node
+		# node_up gets moved as far high as it can be, the upper limit is the earlier node
+		index_node_down = node_list.index(node_down)
+		# get the index in the ranking and check all previous nodes
+		index_node_up = node_list.index(node_up)
+		node_change = True
+	
+		# This variable is to prevent infinite cycles
+		max_swaps = 1000
+		while (node_change and max_swaps > 0):
+			node_change = False
+			for j in range(index_node_up - 1, index_node_down, -1):
+				# If the current node is not dependent from the earlier one, swap them (by swapping their rank)
+				if (node_list[j] not in node_up.requirements and node_list[j] != node_up):
+					temp = node_list[j].heft_rank
+					node_list[j].heft_rank = node_up.heft_rank
+					node_up.heft_rank = temp
+					if (node_up in clustered_nodes):
+						for clustered_node in clustered_nodes:
+							clustered_node.heft_rank = node_up.heft_rank
+					node_change = True
+					max_swaps -= 1
+				node_list.sort(key=lambda x: x.heft_rank, reverse=True)
+			
+			index_node_down = node_list.index(node_down)
+			index_node_up = node_list.index(node_up)
+			if (index_node_down == index_node_up - 1):
+				if (node_down not in clustered_nodes):
+					clustered_nodes.append(node_down)
+				if (node_up not in clustered_nodes):
+					clustered_nodes.append(node_up)
+
+		# MOVE DOWN highest node
+		node_change = True
+		max_swaps = 1000
+		while (node_change and max_swaps > 0):
+			node_change = False
+			for j in range(index_node_down, index_node_up):
+				if (node_list[j] not in node_down.required_by and node_list[j] != node_down):
+					temp = node_list[j].heft_rank
+					node_list[j].heft_rank = node_down.heft_rank
+					node_down.heft_rank = temp
+					if (node_down in clustered_nodes):
+						for clustered_node in clustered_nodes:
+							clustered_node.heft_rank = node_down.heft_rank
+					node_change = True
+					max_swaps -= 1
+				node_list.sort(key=lambda x: x.heft_rank, reverse=True)	
+
+			index_node_down = node_list.index(node_down)
+			index_node_up = node_list.index(node_up)
+			if (index_node_down == index_node_up - 1):
+				if (node_down not in clustered_nodes):
+					clustered_nodes.append(node_down)
+				if (node_up not in clustered_nodes):
+					clustered_nodes.append(node_up)
+		i += 1
+	node_list.sort(key=lambda x: x.heft_rank, reverse=True)
+
 def simulation():
 	node_list = import_graph()
 	if (not HEFT):
@@ -1041,6 +1217,8 @@ def simulation():
 		max_time = scheduler.create_schedule_GFL_C()
 	elif (HEFT):
 		all_nodes.sort(key=lambda x: x.execution, reverse=False)
+		if (XEFT):
+			build_cluster(all_nodes)
 		scheduler = Schedule(start_points, all_nodes, [], n_cpu, n_gpu)
 		max_time = scheduler.create_schedule_HEFT()
 	else:
@@ -1054,6 +1232,8 @@ def simulation():
 		print('Makespan EDD: ', end=' ')
 	elif (GFL):
 		print('Makespan G-FL: ', end=' ')
+	elif (XEFT):
+		print('Makespan XEFT: ', end=' ')
 	elif (HEFT):
 		print('Makespan HEFT: ', end=' ')
 	elif (GFL_C):
@@ -1106,12 +1286,13 @@ def enable_print():
     sys.stdout = sys.__stdout__
 	
 def main(argv):
-	global GRAPH_FILE, DEADLINE, GFL, HEFT, GFL_C, FRAMES, PIPELINING, n_cpu
+	global GRAPH_FILE, DEADLINE, GFL, HEFT, GFL_C, XEFT, FRAMES, PIPELINING, n_cpu
 	# In case this is getting used as a module for simulations, then all global parameters are reset for the next execution
 	GFL = False
 	DEADLINE = False
 	GFL_C = False
 	HEFT = False
+	XEFT = False
 	n_cpu = 2
 	PIPELINING = False
 	FRAMES = 3
@@ -1127,6 +1308,9 @@ def main(argv):
 			elif int(argv[1]) == 3:
 				HEFT = True
 				GFL_C = True
+			elif int(argv[1]) == 4:
+				HEFT = True
+				XEFT = True
 			FRAMES = int(argv[2])
 			PIPELINING = bool(int(argv[3]))
 			n_cpu = int(argv[4]) if int(argv[4]) <= 5 else 5
@@ -1146,6 +1330,9 @@ def main(argv):
 			elif int(argv[1]) == 3:
 				HEFT = True
 				GFL_C = True
+			elif int(argv[1]) == 4:
+				HEFT = True
+				XEFT = True
 			FRAMES = int(argv[2])
 			PIPELINING = bool(int(argv[3]))
 		except:
@@ -1162,6 +1349,9 @@ def main(argv):
 			elif int(argv[0]) == 3:
 				HEFT = True
 				GFL_C = True
+			elif int(argv[0]) == 4:
+				HEFT = True
+				XEFT = True
 			FRAMES = int(argv[1])
 			PIPELINING = bool(int(argv[2]))
 		except:
@@ -1178,6 +1368,9 @@ def main(argv):
 			elif int(argv[0]) == 3:
 				GFL_C = True
 				HEFT = True
+			elif int(argv[0]) == 4:
+				HEFT = True
+				XEFT = True
 			FRAMES = int(argv[1])
 		except:
 			print('Usage: \n sim.py FILENAME[csv] SCHEDULING(0,1,2) FRAMES(n) PIPELINE(0,1)\nExample: open graph_file.csv, simulate three frames and use EDD without pipeline\n\tsim.py 1 3', file=sys.stderr)
