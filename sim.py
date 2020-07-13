@@ -1,5 +1,6 @@
 import os
 import sys
+import pickle
 import matplotlib.pyplot as plt 
 import matplotlib.patches as mpatches
 from decimal import Decimal, ROUND_HALF_EVEN
@@ -7,7 +8,7 @@ from decimal import Decimal, ROUND_HALF_EVEN
 GRAPH_FILE = 'orb_graph.csv' # File to import the graph								!!! (can be overridden with program parameters)
 n_cpu = 0 #																			!!! (can be overridden with program parameters)
 n_gpu = 1
-PROCESSORS = float(n_cpu+n_gpu)	# Used in the formula to calculate priority points for G-FL
+PROCESSORS = float(n_cpu+n_gpu)	# Used in the formula to calculate priority points for G-FL and build XEFT clusters
 DEADLINE = False # If set to true it will schedule using EDD 						!!! (can be overridden with program parameters)
 GFL = False # If set to true it will schedule using G-FL (CPU only) 				!!! (can be overridden with program parameters)
 HEFT = False # If set to true it will schedule using HEFT 							!!! (can be overridden with program parameters)
@@ -16,7 +17,7 @@ XEFT = False # If set to true it will use XEFT Clusters for HEFT ranks				!!! (c
 PIPELINING = False # If set to true it will enable pipelining						!!! (can be overridden with program parameters)
 FRAMES = 3 # Number of frames to simulate, defualt is 3								!!! (can be overridden with program parameters)
 MAXIMUM_PIPELINING_ATTEMPTS = 100
-MINIMUM_FRAME_DELAY = 33.33 # The minimum time between frames, 16ms is 60 fps, 33ms is 30 fps, 22ms is 45 fps
+MINIMUM_FRAME_DELAY = 0.001 # The minimum time between frames, 16ms is 60 fps, 33ms is 30 fps, 22ms is 45 fps
 
 # If set to False it will make ORB a CPU Only node
 ORB_GPU = False
@@ -27,7 +28,7 @@ SHOW_GRAPH = False
 """
 Structure
 	Classes 	(2)
-	Functions	(14)
+	Functions	(19)
 	Main		(1)
 """
 class Node:
@@ -36,6 +37,8 @@ class Node:
 	set_gpu
 	time
 	avg_time
+	max_time
+	is_same_node
 	__str__
 	'''
 	def __init__(self, name, level, time_cpu, requirements, execution, time_gpu = -1, copy_time = 0):
@@ -67,7 +70,8 @@ class Node:
 	# Returns the computation time required by this node, taking into account if the node is run on CPU or GPU
 	def time(self):
 		return (self.time_gpu if self.is_gpu else self.time_cpu) + self.copy_time
-		
+	
+	# Returns the average run time from all the processors
 	def avg_time(self):
 		if (self.time_cpu != -1 and self.time_gpu != -1):
 			return self.time_gpu + self.time_cpu / 2.0
@@ -76,6 +80,7 @@ class Node:
 		else:
 			return self.time_gpu
 	
+	# Returns the maximum run time from all the processors
 	def max_time(self):
 		return max(self.time_cpu, self.time_gpu)
 	
@@ -141,6 +146,15 @@ class Schedule:
 		# Starting points
 		self.starting_points = starting_points
 		self.create_queues()
+		# -----------------
+		# This variables are used only if the schedule is reloaded from memory using pickle
+		self.DEADLINE = DEADLINE
+		self.GFL = GFL
+		self.HEFT = HEFT
+		self.GFL_C = GFL_C
+		self.XEFT = XEFT
+		self.FRAMES = FRAMES
+		self.PIPELINING = PIPELINING
 	
 	# The nodes which have no dependencies are added to their respective ready queues
 	def create_queues(self):
@@ -542,6 +556,7 @@ class Schedule:
 	def pipeline(self, execution_elements_cpu, execution_elements_gpu, times_cpu, times_gpu):
 		# Calculates how much time was spent idle for all processors
 		self.max_time_pipelining = round(max(times_cpu+times_gpu, key=lambda x: x[-1][1])[-1][1], 2)
+		print('Testing ', GRAPH_FILE)
 		if (DEADLINE):
 			print('Makespan EDD:', end=' ')
 		elif (GFL):
@@ -859,6 +874,11 @@ import_graph
 calculate_end_points
 calculate_start_points
 add_cross_dependencies_between_frames
+build_cluster
+is_reachable
+is_reachable_ric
+apply_rank
+load_data
 simulation
 disable_print
 enable_print
@@ -1113,7 +1133,7 @@ def apply_rank(node_list, cluster):
 		node_change = True
 	
 		# This variable is to prevent infinite cycles
-		max_swaps = 1000
+		max_swaps = 10 # This variable is used to avoid infinite cycles, it should be improved with an "history" of node swaps which gets checked after every cycle (but has to be done properly because complexity has to be low)
 		while (node_change and max_swaps > 0):
 			node_change = False
 			for j in range(index_node_up - 1, index_node_down, -1):
@@ -1122,6 +1142,7 @@ def apply_rank(node_list, cluster):
 					temp = node_list[j].heft_rank
 					node_list[j].heft_rank = node_up.heft_rank
 					node_up.heft_rank = temp
+					# Move all the nodes that are next to this node that are also part of the sluter
 					if (node_up in clustered_nodes):
 						for clustered_node in clustered_nodes:
 							clustered_node.heft_rank = node_up.heft_rank
@@ -1139,7 +1160,7 @@ def apply_rank(node_list, cluster):
 
 		# MOVE DOWN highest node
 		node_change = True
-		max_swaps = 1000
+		max_swaps = 10
 		while (node_change and max_swaps > 0):
 			node_change = False
 			for j in range(index_node_down, index_node_up):
@@ -1163,8 +1184,72 @@ def apply_rank(node_list, cluster):
 					clustered_nodes.append(node_up)
 		i += 1
 	node_list.sort(key=lambda x: x.heft_rank, reverse=True)
+	
+# Shows statistics for an already scheduled graph
+def load_data(input):
+	global DEADLINE, GFL, HEFT, GFL_C, XEFT, FRAMES, PIPELINING, n_cpu, n_gpu
+	scheduler = pickle.load(input)
+	
+	n_cpu = scheduler.n_cpu
+	n_gpu = scheduler.n_gpu
+	DEADLINE = scheduler.DEADLINE
+	GFL = scheduler.GFL
+	HEFT = scheduler.HEFT = HEFT
+	GFL_C = scheduler.GFL_C = GFL_C
+	XEFT = scheduler.XEFT = XEFT
+	FRAMES = scheduler.FRAMES
+	PIPELINING = scheduler.PIPELINING
+	
+	max_time = scheduler.max_time
+	all_nodes_cpu = scheduler.node_list_cpu
+	all_nodes_gpu = scheduler.node_list_gpu
+	all_nodes = all_nodes_cpu + all_nodes_gpu
+	
+	if (DEADLINE):
+		print('Makespan EDD: ', end=' ')
+	elif (GFL):
+		print('Makespan G-FL: ', end=' ')
+	elif (XEFT):
+		print('Makespan XEFT: ', end=' ')
+	elif (HEFT):
+		print('Makespan HEFT: ', end=' ')
+	elif (GFL_C):
+		print('Makespan G-FL custom: ', end=' ')
+	print(str(max_time) + ' ('+str(round(max_time/FRAMES, 2))+')')
 
-def simulation():
+	GPU_labels = ['GPU '+str(i) for i in range(n_gpu-1, -1, -1)]
+	CPU_labels = ['CPU '+str(i) for i in range(n_cpu-1, -1, -1)]
+	
+	# Here at the end are calculated for all tasks average lateness, max lateness, and also exact frame time
+	max_lateness = 0
+	avg_lateness = 0
+	for node in all_nodes:
+		lateness = node.scheduled_time + node.time() - (node.deadline + MINIMUM_FRAME_DELAY * node.execution)
+		avg_lateness += lateness
+		max_lateness = max(max_lateness, lateness)
+	print('Average lateness: '+str(round(float(avg_lateness/len(all_nodes)), 2)))
+	print('Maximum lateness: '+str(round(max_lateness, 2)))
+	print('---')
+	
+	# To calculate frame times, for each frame, we take the first task that starts execution and the last to complete and then the difference is taken as frame time
+	min_time = [10000 for i in range(0, FRAMES)]
+	max_time = [0 for i in range(0, FRAMES)]
+	for node in all_nodes:
+		for execution in range(0, FRAMES):
+			if node.execution == execution:
+				min_time[execution] = round(min(min_time[execution], node.scheduled_time), 2)
+				max_time[execution] = round(max(max_time[execution], node.scheduled_time+node.time()), 2)
+	print('Exact frame times: ')
+	sum_frame_times = 0
+	for i in range(0, FRAMES):
+		sum_frame_times += max_time[i]-min_time[i]
+		print(round(max_time[i]-min_time[i], 2), end=' ')	
+	print('\nAverage frame time: '+str(round(sum_frame_times/FRAMES, 2)))
+
+	if (SHOW_GRAPH):
+		scheduler.create_bar_graph(labels=GPU_labels + CPU_labels)
+
+def simulation(UNIQUE_RUN_ID = None):
 	node_list = import_graph()
 	if (not HEFT):
 		for key in node_list:
@@ -1228,6 +1313,7 @@ def simulation():
 		scheduler = Schedule(start_points, all_nodes_cpu, all_nodes_gpu, n_cpu, n_gpu)
 		max_time = scheduler.create_schedule()
 	
+	
 	if (DEADLINE):
 		print('Makespan EDD: ', end=' ')
 	elif (GFL):
@@ -1274,8 +1360,10 @@ def simulation():
 
 	if (SHOW_GRAPH):
 		scheduler.create_bar_graph(labels=GPU_labels + CPU_labels)
-	
-	return scheduler.max_time, str(scheduler.max_time)+' ('+str(round(scheduler.max_time/FRAMES, 2))+')'
+	if (UNIQUE_RUN_ID != None):
+		with open('./schedules/'+str(UNIQUE_RUN_ID)+'_schedule.pkl', 'wb') as output:
+			pickle.dump(scheduler, output, pickle.HIGHEST_PROTOCOL)
+	return scheduler.max_time
 	
 # Disables stdout for prints
 def disable_print():
@@ -1286,7 +1374,7 @@ def enable_print():
     sys.stdout = sys.__stdout__
 	
 def main(argv):
-	global GRAPH_FILE, DEADLINE, GFL, HEFT, GFL_C, XEFT, FRAMES, PIPELINING, n_cpu
+	global GRAPH_FILE, DEADLINE, GFL, HEFT, GFL_C, XEFT, FRAMES, PIPELINING, n_cpu, PROCESSORS
 	# In case this is getting used as a module for simulations, then all global parameters are reset for the next execution
 	GFL = False
 	DEADLINE = False
@@ -1296,7 +1384,7 @@ def main(argv):
 	n_cpu = 2
 	PIPELINING = False
 	FRAMES = 3
-	if (len(argv) == 5):
+	if (len(argv) == 5 or len(argv) == 7):
 		try:
 			GRAPH_FILE = argv[0]
 			if int(argv[1]) == 1:
@@ -1316,6 +1404,7 @@ def main(argv):
 			n_cpu = int(argv[4]) if int(argv[4]) <= 5 else 5
 			if n_cpu <= 0:
 				n_cpu = 1
+			PROCESSORS = n_cpu + n_gpu
 		except Exception as err:
 			print('Error (Using 5 args input mode)\n', err)
 	elif (len(argv) == 4):
@@ -1377,12 +1466,20 @@ def main(argv):
 			exit()
 	elif (len(argv) == 1):
 		if (argv[0][0]) == '?':
-			GFL = True
 			print('Usage: \n sim.py FILENAME[csv] DEADLINE(0,1) FRAMES(n)\nExample: open timings.csv, simulate three frames and use EDD without Pipeline\n\tsim.py graph_file.csv 1 3 0\nRunning with default settings: \n\tFile ' +str(GRAPH_FILE) + ' Frames: '+str(FRAMES) + ' Scheduling: GFL = '+str(GFL) + ' Pipeline: '+str(PIPELINING))
+		else:
+			try:
+				with open(argv[0], 'rb') as input:
+					load_data(input)
+			except Exception as E:
+				print(E)
+		return
 	else:
 		GFL = True
-	
-	return simulation()
+	if (len(argv) == 7):
+		argv[5].value = simulation(int(argv[6]))
+	else:
+		return simulation()
 
 disable_print()
 if __name__ == '__main__':

@@ -1,158 +1,250 @@
+import os
 import sim as simulator
 import generator
+import multiprocessing
 from shutil import copyfile
 
 SETS = 3
-SIZES_LINEAR = [4, 7, 10]
-DEPTH_TREE = [4, 5, 6]
+'''SIZES_LINEAR = [4, 7, 10]
+DEPTH_TREE = [4, 5, 6]'''
+SIZES_LINEAR = [4]
+DEPTH_TREE = []
 
-# 0 for G-FL, 1 for EDD, 2 for HEFT and 3 for G-FL_C
-SCHEDULER = 4
-SCHEDULER_COMP = 2
+# 0 for G-FL, 1 for EDD, 2 for HEFT, 3 for G-FL_C and 4 for XEFT
 
-avg_res = {}
-# Maximum Pipeline improvement
-max_res = 0.0
-# Maximum improvement from SCHEDULER_COMP to SCHEDULER
-max_res_comp = 0.0
-# Maximum improvement from SCHEDULER_COMP (pipe) to SCHEDULER (pipe)
-max_res_comp_pipe = 0.0
+RUNS = 1
 
-RUNS = 3
+def auto_sim():
+	counter = -1
+	output_csv = 'ID_graph, scheduler, params, sizes, frame, cpu_cores, makespan, makespan_pipe, improvement\n'
+	UNIQUE_RUN_ID = 0 # Used to store the schedule
+	for run in range(RUNS):
+		for SET in range(0, SETS):
+			simulator.enable_print()
+			print('RUN', run, 'SET', SET)
+			simulator.disable_print()
+			for DEPTH in range(len(SIZES_LINEAR)):
+				for HEIGHT in range(len(SIZES_LINEAR)):
+					counter += 1
+					generator.main([SET, SIZES_LINEAR[HEIGHT], SIZES_LINEAR[DEPTH]])
+					copyfile('gen_graph.csv', './graphs/'+str(counter)+'_gen_graph.csv')
+					simulator.enable_print()
+					print('----------------------------------')
+					simulator.disable_print()
+					for CPU_cores in range (2, 6):
+						for FRAMES in range(1, 6, 2):
+							procs = []
+							# GFL
+							SCHEDULER = 0
+							time_0 = multiprocessing.Value("d", 0.0, lock=False)
+							t_0 = multiprocessing.Process(target=simulator.main, args=[['gen_graph.csv', SCHEDULER, FRAMES, 0, CPU_cores, time_0, UNIQUE_RUN_ID]])
+							t_0.start()
+							UNIQUE_RUN_ID_0 = UNIQUE_RUN_ID
+							UNIQUE_RUN_ID += 1
+							procs.append(t_0)
+							
+							# HEFT
+							SCHEDULER = 2
+							time_2 = multiprocessing.Value("d", 0.0, lock=False)
+							t_2 = multiprocessing.Process(target=simulator.main, args=[['gen_graph.csv', SCHEDULER, FRAMES, 0, CPU_cores, time_2, UNIQUE_RUN_ID]])
+							t_2.start()
+							UNIQUE_RUN_ID_2 = UNIQUE_RUN_ID
+							UNIQUE_RUN_ID += 1
+							procs.append(t_2)
+								
+							# GFL_c
+							SCHEDULER = 3
+							time_3 = multiprocessing.Value("d", 0.0, lock=False)
+							t_3 = multiprocessing.Process(target=simulator.main, args=[['gen_graph.csv', SCHEDULER, FRAMES, 0, CPU_cores, time_3, UNIQUE_RUN_ID]])
+							t_3.start()
+							UNIQUE_RUN_ID_3 = UNIQUE_RUN_ID
+							UNIQUE_RUN_ID += 1
+							procs.append(t_3)
+								
+							# XEFT
+							SCHEDULER = 4
+							time_4 = multiprocessing.Value("d", 0.0, lock=False)
+							t_4 = multiprocessing.Process(target=simulator.main, args=[['gen_graph.csv', SCHEDULER, FRAMES, 0, CPU_cores, time_4, UNIQUE_RUN_ID]])
+							t_4.start()
+							UNIQUE_RUN_ID_4 = UNIQUE_RUN_ID
+							UNIQUE_RUN_ID += 1
+							procs.append(t_4)
+							
+							# Pipeline for all schedulers (if it is one frame, we skip this)
+							if (FRAMES != 1):
+								SCHEDULER = 0
+								time_pipe_0 = multiprocessing.Value("d", 0.0, lock=False)
+								t_0_p = multiprocessing.Process(target=simulator.main, args=[['gen_graph.csv', SCHEDULER, FRAMES, 1, CPU_cores, time_pipe_0, UNIQUE_RUN_ID]])
+								t_0_p.start()
+								UNIQUE_RUN_ID_0_P = UNIQUE_RUN_ID
+								UNIQUE_RUN_ID += 1
+								procs.append(t_0_p)
+								
+								SCHEDULER = 2
+								time_pipe_2 = multiprocessing.Value("d", 0.0, lock=False)
+								t_2_p = multiprocessing.Process(target=simulator.main, args=[['gen_graph.csv', SCHEDULER, FRAMES, 1, CPU_cores, time_pipe_2, UNIQUE_RUN_ID]])
+								t_2_p.start()
+								UNIQUE_RUN_ID_2_P = UNIQUE_RUN_ID
+								UNIQUE_RUN_ID += 1
+								procs.append(t_2_p)
+								
+								SCHEDULER = 3
+								time_pipe_3 = multiprocessing.Value("d", 0.0, lock=False)
+								t_3_p = multiprocessing.Process(target=simulator.main, args=[['gen_graph.csv', SCHEDULER, FRAMES, 1, CPU_cores, time_pipe_3, UNIQUE_RUN_ID]])
+								t_3_p.start()
+								UNIQUE_RUN_ID_3_P = UNIQUE_RUN_ID
+								UNIQUE_RUN_ID += 1
+								procs.append(t_3_p)
+								
+								SCHEDULER = 4
+								time_pipe_4 = multiprocessing.Value("d", 0.0, lock=False)
+								t_4_p = multiprocessing.Process(target=simulator.main, args=[['gen_graph.csv', SCHEDULER, FRAMES, 1, CPU_cores, time_pipe_4, UNIQUE_RUN_ID]])
+								t_4_p.start()
+								UNIQUE_RUN_ID_4_P = UNIQUE_RUN_ID
+								UNIQUE_RUN_ID += 1
+								procs.append(t_4_p)
+							else:
+								time_pipe_0 = time_0
+								time_pipe_2 = time_2
+								time_pipe_3 = time_3
+								time_pipe_4 = time_4
+							
+							for t in procs:
+								t.join()
+								
+							time_0 = time_0.value
+							time_2 = time_2.value
+							time_3 = time_3.value
+							time_4 = time_4.value
+							time_pipe_0 = time_pipe_0.value
+							time_pipe_2 = time_pipe_2.value
+							time_pipe_3 = time_pipe_3.value
+							time_pipe_4 = time_pipe_4.value
+								
+							
+							output_csv += (str(UNIQUE_RUN_ID_0) if FRAMES == 1 else str(UNIQUE_RUN_ID_0)+'.'+str(UNIQUE_RUN_ID_0_P))+','+str(counter)+','+str(0)+','+'L_'+str(SET)+','+str(SIZES_LINEAR[HEIGHT])+'.'+str(SIZES_LINEAR[DEPTH])+','+str(FRAMES)+','+str(CPU_cores)+','+str(round(time_0, 2))+','+str(round(time_pipe_0, 2))+','+str(round(((time_0/time_pipe_0)-1.0)*100, 2))+'\n'
+							
+							output_csv += (str(UNIQUE_RUN_ID_2) if FRAMES == 1 else str(UNIQUE_RUN_ID_2)+'.'+str(UNIQUE_RUN_ID_2_P))+','+str(counter)+','+str(2)+','+'L_'+str(SET)+','+str(SIZES_LINEAR[HEIGHT])+'.'+str(SIZES_LINEAR[DEPTH])+','+str(FRAMES)+','+str(CPU_cores)+','+str(round(time_2, 2))+','+str(round(time_pipe_2, 2))+','+str(round(((time_2/time_pipe_2)-1.0)*100, 2))+'\n'
+							
+							output_csv += (str(UNIQUE_RUN_ID_3) if FRAMES == 1 else str(UNIQUE_RUN_ID_3)+'.'+str(UNIQUE_RUN_ID_3_P))+','+str(counter)+','+str(3)+','+'L_'+str(SET)+','+str(SIZES_LINEAR[HEIGHT])+'.'+str(SIZES_LINEAR[DEPTH])+','+str(FRAMES)+','+str(CPU_cores)+','+str(round(time_3, 2))+','+str(round(time_pipe_3, 2))+','+str(round(((time_3/time_pipe_3)-1.0)*100, 2))+'\n'
+							
+							output_csv += (str(UNIQUE_RUN_ID_4) if FRAMES == 1 else str(UNIQUE_RUN_ID_4)+'.'+str(UNIQUE_RUN_ID_4_P))+','+str(counter)+','+str(4)+','+'L_'+str(SET)+','+str(SIZES_LINEAR[HEIGHT])+'.'+str(SIZES_LINEAR[DEPTH])+','+str(FRAMES)+','+str(CPU_cores)+','+str(round(time_4, 2))+','+str(round(time_pipe_4, 2))+','+str(round(((time_4/time_pipe_4)-1.0)*100, 2))+'\n'
+							
+							simulator.enable_print()
+							print(counter, 'L', str(SIZES_LINEAR[HEIGHT])+','+str(SIZES_LINEAR[DEPTH]), 'Frames', FRAMES, 'Cpu cores', CPU_cores, 'DONE')
+							simulator.disable_print()
 
-counter = 0
-
-for run in range(RUNS):
-	simulator.enable_print()
-	print('RUN', run)
-	simulator.disable_print()
-	for set in range(0, SETS):
-		simulator.enable_print()
-		print('SET', set)
-		simulator.disable_print()
-		for DEPTH in range(len(SIZES_LINEAR)):
-			for HEIGHT in range(len(SIZES_LINEAR)):
-				generator.main([set, SIZES_LINEAR[HEIGHT], SIZES_LINEAR[DEPTH]])
+			for DEPTH in range(len(DEPTH_TREE)):
 				counter += 1
+				generator.main([SET, DEPTH_TREE[DEPTH]])
+				copyfile('gen_graph.csv', './graphs/'+str(counter)+'_gen_graph.csv')
 				simulator.enable_print()
 				print('----------------------------------')
 				simulator.disable_print()
-				temp_sum = 0
-				temp_sum_comp = 0
-				temp_sum_comp_pipe = 0
-				temp_count = 0
-				temp_sum_2_cpu = 0
-				temp_sum_5_cpu = 0
-				temp_count_2_cpu = 0
-				temp_count_5_cpu = 0
 				for CPU_cores in range (2, 6):
 					for FRAMES in range(1, 6, 2):
-						comp_time, output = simulator.main(['gen_graph.csv', SCHEDULER_COMP, FRAMES, 0, CPU_cores])
-						comp_time_pipe, output = simulator.main(['gen_graph.csv', SCHEDULER_COMP, FRAMES, 1, CPU_cores])
+						procs = []
+						# GFL
+						SCHEDULER = 0
+						time_0 = multiprocessing.Value("d", 0.0, lock=False)
+						t_0 = multiprocessing.Process(target=simulator.main, args=[['gen_graph.csv', SCHEDULER, FRAMES, 0, CPU_cores, time_0, UNIQUE_RUN_ID]])
+						t_0.start()
+						UNIQUE_RUN_ID_0 = UNIQUE_RUN_ID
+						UNIQUE_RUN_ID += 1
+						procs.append(t_0)
 						
-						output_line = 'Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')\t'
-						output_line += 'CPU cores: '+str(CPU_cores)+' '
-						output_line += 'FRAMES: '+str(FRAMES)+' '
-						time, output = simulator.main(['gen_graph.csv', SCHEDULER, FRAMES, 0, CPU_cores])
-						output_line += 'Makespan (Frame): '+ output + ' '
+						# HEFT
+						SCHEDULER = 2
+						time_2 = multiprocessing.Value("d", 0.0, lock=False)
+						t_2 = multiprocessing.Process(target=simulator.main, args=[['gen_graph.csv', SCHEDULER, FRAMES, 0, CPU_cores, time_2, UNIQUE_RUN_ID]])
+						t_2.start()
+						UNIQUE_RUN_ID_2 = UNIQUE_RUN_ID
+						UNIQUE_RUN_ID += 1
+						procs.append(t_2)
+							
+						# GFL_c
+						SCHEDULER = 3
+						time_3 = multiprocessing.Value("d", 0.0, lock=False)
+						t_3 = multiprocessing.Process(target=simulator.main, args=[['gen_graph.csv', SCHEDULER, FRAMES, 0, CPU_cores, time_3, UNIQUE_RUN_ID]])
+						t_3.start()
+						UNIQUE_RUN_ID_3 = UNIQUE_RUN_ID
+						UNIQUE_RUN_ID += 1
+						procs.append(t_3)
+							
+						# XEFT
+						SCHEDULER = 4
+						time_4 = multiprocessing.Value("d", 0.0, lock=False)
+						t_4 = multiprocessing.Process(target=simulator.main, args=[['gen_graph.csv', SCHEDULER, FRAMES, 0, CPU_cores, time_4, UNIQUE_RUN_ID]])
+						t_4.start()
+						UNIQUE_RUN_ID_4 = UNIQUE_RUN_ID
+						UNIQUE_RUN_ID += 1
+						procs.append(t_4)
 						
+						# Pipeline for all schedulers (if it is one frame, we skip this)
 						if (FRAMES != 1):
-							time_pipe, output = simulator.main(['gen_graph.csv', SCHEDULER, FRAMES, 1, CPU_cores])
-							if round(((time/time_pipe)-1.0)*100, 2) >= 25.0:
-								copyfile('gen_graph.csv', './graph25+/'+str(counter)+'_gen_graph_lin-Sc_'+str(SCHEDULER)+'-Set_'+str(set)+'-F_'+str(FRAMES)+'-CPU_'+str(CPU_cores)+'-'+str(int(((time/time_pipe)-1.0)*100))+'%.csv')
-								
-							output_line += '\tPIPE (%): '+ str(round(((time/time_pipe)-1.0)*100, 2)) + '%\t' + output
+							SCHEDULER = 0
+							time_pipe_0 = multiprocessing.Value("d", 0.0, lock=False)
+							t_0_p = multiprocessing.Process(target=simulator.main, args=[['gen_graph.csv', SCHEDULER, FRAMES, 1, CPU_cores, time_pipe_0, UNIQUE_RUN_ID]])
+							t_0_p.start()
+							UNIQUE_RUN_ID_0_P = UNIQUE_RUN_ID
+							UNIQUE_RUN_ID += 1
+							procs.append(t_0_p)
 							
-							temp_sum += round(((time/time_pipe)-1.0)*100, 2)
+							SCHEDULER = 2
+							time_pipe_2 = multiprocessing.Value("d", 0.0, lock=False)
+							t_2_p = multiprocessing.Process(target=simulator.main, args=[['gen_graph.csv', SCHEDULER, FRAMES, 1, CPU_cores, time_pipe_2, UNIQUE_RUN_ID]])
+							t_2_p.start()
+							UNIQUE_RUN_ID_2_P = UNIQUE_RUN_ID
+							UNIQUE_RUN_ID += 1
+							procs.append(t_2_p)
 							
-							if (CPU_cores == 2):
-								temp_sum_2_cpu += round(((time/time_pipe)-1.0)*100, 2)
-								temp_count_2_cpu += 1
-							if (CPU_cores == 5):
-								temp_sum_5_cpu += round(((time/time_pipe)-1.0)*100, 2)
-								temp_count_5_cpu += 1
-								
-							temp_sum_comp += round(((comp_time/time)-1.0)*100, 2)
-							temp_sum_comp_pipe += round(((comp_time_pipe/time_pipe)-1.0)*100, 2)
-							temp_count += 1
+							SCHEDULER = 3
+							time_pipe_3 = multiprocessing.Value("d", 0.0, lock=False)
+							t_3_p = multiprocessing.Process(target=simulator.main, args=[['gen_graph.csv', SCHEDULER, FRAMES, 1, CPU_cores, time_pipe_3, UNIQUE_RUN_ID]])
+							t_3_p.start()
+							UNIQUE_RUN_ID_3_P = UNIQUE_RUN_ID
+							UNIQUE_RUN_ID += 1
+							procs.append(t_3_p)
 							
-							if max_res < round(((time/time_pipe)-1.0)*100, 2):
-								max_res = round(((time/time_pipe)-1.0)*100, 2)
-								
-							if max_res_comp < round(((comp_time/time)-1.0)*100, 2):
-								max_res_comp = round(((comp_time/time)-1.0)*100, 2)
-								
-							if max_res_comp_pipe < round(((comp_time_pipe/time_pipe)-1.0)*100, 2):
-								max_res_comp_pipe = round(((comp_time_pipe/time_pipe)-1.0)*100, 2)
-								
+							SCHEDULER = 4
+							time_pipe_4 = multiprocessing.Value("d", 0.0, lock=False)
+							t_4_p = multiprocessing.Process(target=simulator.main, args=[['gen_graph.csv', SCHEDULER, FRAMES, 1, CPU_cores, time_pipe_4, UNIQUE_RUN_ID]])
+							t_4_p.start()
+							UNIQUE_RUN_ID_4_P = UNIQUE_RUN_ID
+							UNIQUE_RUN_ID += 1
+							procs.append(t_4_p)
+						else:
+							time_pipe_0 = time_0
+							time_pipe_2 = time_2
+							time_pipe_3 = time_3
+							time_pipe_4 = time_4
+						
+						for t in procs:
+							t.join()
+						
+						time_0 = time_0.value
+						time_2 = time_2.value
+						time_3 = time_3.value
+						time_4 = time_4.value
+						time_pipe_0 = time_pipe_0.value
+						time_pipe_2 = time_pipe_2.value
+						time_pipe_3 = time_pipe_3.value
+						time_pipe_4 = time_pipe_4.value
+						
+						output_csv += (str(UNIQUE_RUN_ID_0) if FRAMES == 1 else str(UNIQUE_RUN_ID_0)+'.'+str(UNIQUE_RUN_ID_0_P))+','+str(counter)+','+str(0)+','+'T_'+str(SET)+','+str(DEPTH_TREE[DEPTH])+','+str(FRAMES)+','+str(CPU_cores)+','+str(round(time_0, 2))+','+str(round(time_pipe_0, 2))+','+str(round(((time_0/time_pipe_0)-1.0)*100, 2))+'\n'
+						
+						output_csv += (str(UNIQUE_RUN_ID_2) if FRAMES == 1 else str(UNIQUE_RUN_ID_2)+'.'+str(UNIQUE_RUN_ID_2_P))+','+str(counter)+','+str(2)+','+'T_'+str(SET)+','+str(DEPTH_TREE[DEPTH])+','+str(FRAMES)+','+str(CPU_cores)+','+str(round(time_2, 2))+','+str(round(time_pipe_2, 2))+','+str(round(((time_2/time_pipe_2)-1.0)*100, 2))+'\n'
+						
+						output_csv += (str(UNIQUE_RUN_ID_3) if FRAMES == 1 else str(UNIQUE_RUN_ID_3)+'.'+str(UNIQUE_RUN_ID_3_P))+','+str(counter)+','+str(3)+','+'T_'+str(SET)+','+str(DEPTH_TREE[DEPTH])+','+str(FRAMES)+','+str(CPU_cores)+','+str(round(time_3, 2))+','+str(round(time_pipe_3, 2))+','+str(round(((time_3/time_pipe_3)-1.0)*100, 2))+'\n'
+						
+						output_csv += (str(UNIQUE_RUN_ID_4) if FRAMES == 1 else str(UNIQUE_RUN_ID_4)+'.'+str(UNIQUE_RUN_ID_4_P))+','+str(counter)+','+str(4)+','+'T_'+str(SET)+','+str(DEPTH_TREE[DEPTH])+','+str(FRAMES)+','+str(CPU_cores)+','+str(round(time_4, 2))+','+str(round(time_pipe_4, 2))+','+str(round(((time_4/time_pipe_4)-1.0)*100, 2))+'\n'
+						
 						simulator.enable_print()
-						print(output_line)
-						simulator.disable_print()						
-				if 'Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')' in avg_res.keys():
-					avg_res['Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')'] = (avg_res['Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')'][0] + round(temp_sum/temp_count, 2), avg_res['Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')'][1] + round(temp_sum_comp/temp_count, 2), avg_res['Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')'][2] + round(temp_sum_comp_pipe/temp_count, 2), avg_res['Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')'][3] + round(temp_sum_2_cpu/temp_count_2_cpu, 2), avg_res['Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')'][4] + round(temp_sum_5_cpu/temp_count_5_cpu, 2))
-				else:
-					avg_res['Linear('+str(SIZES_LINEAR[HEIGHT])+', '+str(SIZES_LINEAR[DEPTH])+')'] = (round(temp_sum/temp_count, 2), round(temp_sum_comp/temp_count, 2), round(temp_sum_comp_pipe/temp_count, 2), round(temp_sum_2_cpu/temp_count_2_cpu, 2), round(temp_sum_5_cpu/temp_count_5_cpu, 2))
+						print(counter, 'T', DEPTH_TREE[DEPTH], 'Frames', FRAMES, 'Cpu cores', CPU_cores, 'DONE')
+						simulator.disable_print()
 
-		for DEPTH in range(len(DEPTH_TREE)):
-			generator.main([set, DEPTH_TREE[DEPTH]])
-			counter += 1
-			simulator.enable_print()
-			print('----------------------------------')
-			simulator.disable_print()
-			temp_sum = 0
-			temp_sum_comp = 0
-			temp_sum_comp_pipe = 0
-			temp_count = 0
-			temp_sum_2_cpu = 0
-			temp_sum_5_cpu = 0
-			temp_count_2_cpu = 0
-			temp_count_5_cpu = 0
-			for CPU_cores in range (2, 6):
-				for FRAMES in range(1, 6, 2):				
-					comp_time, output = simulator.main(['gen_graph.csv', SCHEDULER_COMP, FRAMES, 0, CPU_cores])
-					comp_time_pipe, output = simulator.main(['gen_graph.csv', SCHEDULER_COMP, FRAMES, 1, CPU_cores])
-					
-					output_line = 'Tree('+str(DEPTH_TREE[DEPTH])+')\t'
-					output_line += 'CPU cores: '+str(CPU_cores)+' '
-					output_line += 'FRAMES: '+str(FRAMES)+' '
-					time, output = simulator.main(['gen_graph.csv', SCHEDULER, FRAMES, 0, CPU_cores])
-					output_line += 'Makespan (Frame): '+ output + ' '
-					
-					if (FRAMES != 1):
-						time_pipe, output = simulator.main(['gen_graph.csv', SCHEDULER, FRAMES, 1, CPU_cores])
-						if round(((time/time_pipe)-1.0)*100, 2) >= 25.0:
-							copyfile('gen_graph.csv', './graph25+/'+str(counter)+'_gen_graph_tree-Sc_'+str(SCHEDULER)+'-Set_'+str(set)+'-F_'+str(FRAMES)+'-CPU_'+str(CPU_cores)+'-'+str(int(((time/time_pipe)-1.0)*100))+'%.csv')
-							
-						output_line += '\tPIPE (%): '+ str(round(((time/time_pipe)-1.0)*100, 2)) + '%\t' + output
-						
-						temp_sum += round(((time/time_pipe)-1.0)*100, 2)
-						
-						if (CPU_cores == 2):
-							temp_sum_2_cpu += round(((time/time_pipe)-1.0)*100, 2)
-							temp_count_2_cpu += 1
-						if (CPU_cores == 5):
-							temp_sum_5_cpu += round(((time/time_pipe)-1.0)*100, 2)
-							temp_count_5_cpu += 1
-							
-						temp_sum_comp += round(((comp_time/time)-1.0)*100, 2)
-						temp_sum_comp_pipe += round(((comp_time_pipe/time_pipe)-1.0)*100, 2)
-						temp_count += 1
-						
-						if max_res < round(((time/time_pipe)-1.0)*100, 2):
-							max_res = round(((time/time_pipe)-1.0)*100, 2)
-						
-					simulator.enable_print()
-					print(output_line)
-					simulator.disable_print()
-			if 'Tree('+str(DEPTH_TREE[DEPTH])+')' in avg_res.keys():
-				avg_res['Tree('+str(DEPTH_TREE[DEPTH])+')'] = (avg_res['Tree('+str(DEPTH_TREE[DEPTH])+')'][0] + round(temp_sum/temp_count, 2), avg_res['Tree('+str(DEPTH_TREE[DEPTH])+')'][1] + round(temp_sum_comp/temp_count, 2), avg_res['Tree('+str(DEPTH_TREE[DEPTH])+')'][2] + round(temp_sum_comp_pipe/temp_count, 2), avg_res['Tree('+str(DEPTH_TREE[DEPTH])+')'][3] + round(temp_sum_2_cpu/temp_count_2_cpu, 2), avg_res['Tree('+str(DEPTH_TREE[DEPTH])+')'][4] + round(temp_sum_5_cpu/temp_count_5_cpu, 2))
-			else:
-				avg_res['Tree('+str(DEPTH_TREE[DEPTH])+')'] = (round(temp_sum/temp_count, 2), round(temp_sum_comp/temp_count, 2), round(temp_sum_comp_pipe/temp_count, 2), round(temp_sum_2_cpu/temp_count_2_cpu, 2), round(temp_sum_5_cpu/temp_count_5_cpu, 2))
-		
-for key in avg_res:
-	simulator.enable_print()
-	print(str(key), round(avg_res[key][0]/RUNS, 2), round(avg_res[key][1]/RUNS, 2), round(avg_res[key][2]/RUNS, 2), round(avg_res[key][3]/RUNS, 2), round(avg_res[key][4]/RUNS, 2))
+	with open('output.csv', 'w+') as output:
+		output.write(output_csv)
 
-print('Max pipe improvement', max_res)
-print('Max improvement from SCHEDULER_COMP to SCHEDULER', max_res_comp)
-print('Max improvement from SCHEDULER_COMP (pipe) to SCHEDULER (pipe)', max_res_comp_pipe)
+if __name__ == "__main__":
+	auto_sim()
