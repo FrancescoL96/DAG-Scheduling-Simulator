@@ -1123,8 +1123,8 @@ def apply_rank(node_list, cluster):
 	i = 0
 	clustered_nodes = []
 	while (i < len(cluster) - 1):
-		node_down = cluster[i]
-		node_up = cluster[i+1]
+		node_down = cluster[i] # This is the node that has to MOVE towards the BOTTOM of the list
+		node_up = cluster[i+1] # This is the node that has to MOVE towards the TOP of the list
 		# MOVE UP lowest node
 		# node_up gets moved as far high as it can be, the upper limit is the earlier node
 		index_node_down = node_list.index(node_down)
@@ -1134,54 +1134,64 @@ def apply_rank(node_list, cluster):
 	
 		# This variable is to prevent infinite cycles
 		max_swaps = 10 # This variable is used to avoid infinite cycles, it should be improved with an "history" of node swaps which gets checked after every cycle (but has to be done properly because complexity has to be low)
+		last_swap = [None]
 		while (node_change and max_swaps > 0):
 			node_change = False
 			for j in range(index_node_up - 1, index_node_down, -1):
 				# If the current node is not dependent from the earlier one, swap them (by swapping their rank)
-				if (node_list[j] not in node_up.requirements and node_list[j] != node_up):
-					temp = node_list[j].heft_rank
-					node_list[j].heft_rank = node_up.heft_rank
-					node_up.heft_rank = temp
+				if (node_list[j] not in node_up.requirements and node_list[j] != node_up and last_swap[-1] != node_list[j]):
+					if (node_list[j].heft_rank != node_up.heft_rank):
+						temp = node_list[j].heft_rank
+						node_list[j].heft_rank = node_up.heft_rank
+						node_up.heft_rank = temp
+					else: # If they have the same rank, they are physically swapped inside the list (a stable sorting algorithm is used, so order is preserved)
+						node_list[node_list.index(node_up)] = node_list[j]
+						node_list[j] = node_up
 					# Move all the nodes that are next to this node that are also part of the sluter
 					if (node_up in clustered_nodes):
 						for clustered_node in clustered_nodes:
 							clustered_node.heft_rank = node_up.heft_rank
 					node_change = True
 					max_swaps -= 1
+					last_swap.append(node_list[j])
 				node_list.sort(key=lambda x: x.heft_rank, reverse=True)
-			
-			index_node_down = node_list.index(node_down)
-			index_node_up = node_list.index(node_up)
-			if (index_node_down == index_node_up - 1):
-				if (node_down not in clustered_nodes):
-					clustered_nodes.append(node_down)
-				if (node_up not in clustered_nodes):
-					clustered_nodes.append(node_up)
+				index_node_down = node_list.index(node_down)
+				index_node_up = node_list.index(node_up)
+				
+				if (index_node_down == index_node_up - 1):
+					if (node_down not in clustered_nodes):
+						clustered_nodes.append(node_down)
+					if (node_up not in clustered_nodes):
+						clustered_nodes.append(node_up)
 
-		# MOVE DOWN highest node
+		# MOVE DOWN highest node, behaves like MOVE UP, but in reverse order (as we are trying to move down nodes instead of up)
 		node_change = True
 		max_swaps = 10
 		while (node_change and max_swaps > 0):
 			node_change = False
 			for j in range(index_node_down, index_node_up):
-				if (node_list[j] not in node_down.required_by and node_list[j] != node_down):
-					temp = node_list[j].heft_rank
-					node_list[j].heft_rank = node_down.heft_rank
-					node_down.heft_rank = temp
+				if (node_list[j] not in node_down.required_by and node_list[j] != node_down and last_swap[-1] != node_list[j]):
+					if (node_list[j].heft_rank != node_down.heft_rank):
+						temp = node_list[j].heft_rank
+						node_list[j].heft_rank = node_down.heft_rank
+						node_down.heft_rank = temp
+					else:
+						node_list[node_list.index(node_down)] = node_list[j]
+						node_list[j] = node_down
 					if (node_down in clustered_nodes):
 						for clustered_node in clustered_nodes:
 							clustered_node.heft_rank = node_down.heft_rank
 					node_change = True
 					max_swaps -= 1
+					last_swap.append(node_list[j])
 				node_list.sort(key=lambda x: x.heft_rank, reverse=True)	
-
-			index_node_down = node_list.index(node_down)
-			index_node_up = node_list.index(node_up)
-			if (index_node_down == index_node_up - 1):
-				if (node_down not in clustered_nodes):
-					clustered_nodes.append(node_down)
-				if (node_up not in clustered_nodes):
-					clustered_nodes.append(node_up)
+				index_node_down = node_list.index(node_down)
+				index_node_up = node_list.index(node_up)
+				if (index_node_down == index_node_up - 1):
+					if (node_down not in clustered_nodes):
+						clustered_nodes.append(node_down)
+					if (node_up not in clustered_nodes):
+						clustered_nodes.append(node_up)
 		i += 1
 	node_list.sort(key=lambda x: x.heft_rank, reverse=True)
 	

@@ -5,14 +5,12 @@ import multiprocessing
 from shutil import copyfile
 
 SETS = 3
-'''SIZES_LINEAR = [4, 7, 10]
-DEPTH_TREE = [4, 5, 6]'''
-SIZES_LINEAR = [4]
-DEPTH_TREE = []
+SIZES_LINEAR = [4, 7, 10]
+DEPTH_TREE = [4, 5, 6]
 
 # 0 for G-FL, 1 for EDD, 2 for HEFT, 3 for G-FL_C and 4 for XEFT
 
-RUNS = 1
+RUNS = 100
 
 def auto_sim():
 	counter = -1
