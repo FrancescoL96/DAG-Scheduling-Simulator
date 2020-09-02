@@ -14,7 +14,7 @@ RUNS = 100
 
 def auto_sim():
 	counter = -1
-	output_csv = 'ID_graph, scheduler, params, sizes, frame, cpu_cores, makespan, makespan_pipe, improvement\n'
+	output_csv = 'UNIQUE_RUN_ID, ID_graph, scheduler, params, sizes, frame, cpu_cores, makespan, makespan_pipe, improvement\n'
 	UNIQUE_RUN_ID = 0 # Used to store the schedule
 	for run in range(RUNS):
 		for SET in range(0, SETS):
@@ -30,7 +30,7 @@ def auto_sim():
 					print('----------------------------------')
 					simulator.disable_print()
 					for CPU_cores in range (2, 6):
-						for FRAMES in range(1, 6, 2):
+						for FRAMES in range(5, 11, 5):
 							procs = []
 							# GFL
 							SCHEDULER = 0
@@ -140,7 +140,7 @@ def auto_sim():
 				print('----------------------------------')
 				simulator.disable_print()
 				for CPU_cores in range (2, 6):
-					for FRAMES in range(1, 6, 2):
+					for FRAMES in range(5, 11, 5):
 						procs = []
 						# GFL
 						SCHEDULER = 0

@@ -23,7 +23,7 @@ MINIMUM_FRAME_DELAY = 0.001 # The minimum time between frames, 16ms is 60 fps, 3
 ORB_GPU = False
 
 # If set to True it will display a graph with the scheduling
-SHOW_GRAPH = False
+SHOW_GRAPH = True
 
 """
 Structure
@@ -126,6 +126,7 @@ class Schedule:
 	set_minimum_start_time
 	can_any_node_be_run_earlier
 	calculate_idle_time
+	calculate_idle_time_head_tail
 	get_first_time_gap
 	create_bar_graph
 	'''
@@ -715,7 +716,70 @@ class Schedule:
 			else:
 				print('GPU '+str(times.index(processor_times))+': '+str(round(idle_time, 2))+' ('+str(round(idle_time/self.max_time_pipelining * 100, 2))+'%)')
 		return round(total_time, 2)
+	
+	# This function calculates idle head/tail times for each processing unit
+	def calculate_idle_time_head_tail(self):
+		cpu_idle_head = []
+		cpu_idle_tail = []
+		gpu_idle_head = []
+		gpu_idle_tail = []
+		for processor in self.node_list:
+			if (len(processor) > 0):
+				node_first = processor[0]
+				node_last = processor[len(processor)-1]
+				# Node a is always the first node scheduled, but it is there as the DAG starting point for generated graphs and should not be contuned
+				if (node_first.name == 'a' and len(processor) > 1):
+					node_first = processor[1]
+					
 				
+				if (node_first.is_gpu):
+					gpu_idle_head.append(node_first.scheduled_time)
+				else:
+					cpu_idle_head.append(node_first.scheduled_time)
+
+				if (node_last.is_gpu):
+					gpu_idle_tail.append(self.max_time - node_last.scheduled_time)
+				else:
+					cpu_idle_tail.append(self.max_time - node_last.scheduled_time)
+	
+		result = []
+		result.append(sum(cpu_idle_head))
+		result.append(sum(cpu_idle_tail))
+		result.append(sum(gpu_idle_head))
+		result.append(sum(gpu_idle_tail))
+		return result
+		
+	# For the given schedule, returns the amount of buffers needed to store the frames when pipelining
+	def get_memory_overlap(self):
+		frame_start_times = [self.max_time for i in range(0, self.FRAMES)]
+		frame_end_times = [0.0 for i in range(0, self.FRAMES)]
+		for processor in self.node_list:
+			for node in processor:
+				# We ignore the node that starts the graph
+				if (node.name == 'a'):
+					continue
+				# update minimum start time for the frame of the current node
+				if node.scheduled_time < frame_start_times[node.execution]:
+					frame_start_times[node.execution] = node.scheduled_time
+				# update maximum end time for the frame of the current node	
+				if node.scheduled_time + node.time() > frame_end_times[node.execution]:
+					frame_end_times[node.execution] = node.scheduled_time + node.time()
+					
+		# Checks the overlap for each frame, if there is overlap, we need an additional buffer		
+		i = 0
+		j = 0
+		cur_overlap = 0
+		max_overlap = 0
+		while (i < self.FRAMES and j < self.FRAMES):
+			if frame_start_times[i] < frame_end_times[j]:
+				cur_overlap += 1
+				max_overlap = max(max_overlap, cur_overlap)
+				i += 1
+			else:
+				cur_overlap -= 1
+				j += 1
+		
+		return max_overlap
 
 	# Given the times for all the processors, searches for a gap at least the size of min_gap
 	# Returns the start of the gap, the end of the gap and the processor in which it has been found
@@ -819,9 +883,9 @@ class Schedule:
 				if (node.execution >= 0):
 					#name.append(node.name[0]+'_'+str(node.level)+'_'+str(node.execution)+(' ('+str(node.priority_point)+')' if not node.is_gpu else ''))
 					#name.append(node.name[0]+node.name[-1]+'_'+str(node.level)+'_'+str(node.execution))
-					if node.time() >= 0.9:
-						name.append(str(node.level)+'_'+str(node.execution))
-						#name.append(node.name[1])
+					if node.time() >= 0.9 and len(node.name) > 1:
+						#name.append(str(node.level)+'_'+str(node.execution))
+						name.append(node.name[1])
 					else:
 						name.append("")
 					bar.append((node.scheduled_time, node.time()))
@@ -1204,9 +1268,9 @@ def load_data(input):
 	n_gpu = scheduler.n_gpu
 	DEADLINE = scheduler.DEADLINE
 	GFL = scheduler.GFL
-	HEFT = scheduler.HEFT = HEFT
-	GFL_C = scheduler.GFL_C = GFL_C
-	XEFT = scheduler.XEFT = XEFT
+	HEFT = scheduler.HEFT
+	GFL_C = scheduler.GFL_C
+	XEFT = scheduler.XEFT
 	FRAMES = scheduler.FRAMES
 	PIPELINING = scheduler.PIPELINING
 	
@@ -1229,6 +1293,9 @@ def load_data(input):
 
 	GPU_labels = ['GPU '+str(i) for i in range(n_gpu-1, -1, -1)]
 	CPU_labels = ['CPU '+str(i) for i in range(n_cpu-1, -1, -1)]
+	
+	#idle_times = scheduler.calculate_idle_time_head_tail()
+	buffers = scheduler.get_memory_overlap()
 	
 	# Here at the end are calculated for all tasks average lateness, max lateness, and also exact frame time
 	max_lateness = 0
@@ -1258,6 +1325,18 @@ def load_data(input):
 
 	if (SHOW_GRAPH):
 		scheduler.create_bar_graph(labels=GPU_labels + CPU_labels)
+
+	'''
+	this is the output to print in the csv the head/tail idle times
+	output = ''
+	for i in range(0, len(idle_times)):
+		if i != len(idle_times) - 1:
+			output += str(round(idle_times[i], 2)) + ','
+		else:
+			output += str(round(idle_times[i], 2)) + '\n'
+	return output'''
+	return str(buffers)+'\n'
+		
 
 def simulation(UNIQUE_RUN_ID = None):
 	node_list = import_graph()
@@ -1480,7 +1559,7 @@ def main(argv):
 		else:
 			try:
 				with open(argv[0], 'rb') as input:
-					load_data(input)
+					return load_data(input)
 			except Exception as E:
 				print(E)
 		return
