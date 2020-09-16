@@ -1,5 +1,5 @@
 # DAG Scheduling Simulator
-This python script simulates the allocation of the nodes of the orb slam tracking on any number of CPUs and GPUs using G-FL(0), EDD(1) or HEFT(2)/XEFT(4) scheduling. A custom version of G-FL is also available(3), which uses G-FL normally for scheduling, but uses the HEFT mapping instead of the default approach (VisionWork style).
+This python script simulates the allocation of the nodes of an OpenVX DAG on any number of CPUs and GPUs using G-FL(0), EDD(1) or HEFT(2)/XEFT(4) scheduling. A custom version of G-FL is also available(3), which uses G-FL normally for scheduling, but uses the HEFT mapping instead of the default approach (VisionWork style).
 ## Requirements
 In order to run these scripts the following libraries are required:
 ```
