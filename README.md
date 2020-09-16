@@ -24,7 +24,7 @@ Simulates using HEFT, 10 frames and pipeline, loading from "graph.csv"
 sim.py graph.csv 2 10 1
 ```
 ### Auto simulation with generated graphs
-Simulates a number of generated graphs (using generator.py and sim.py), output in "outout.csv"
+Simulates a number of generated graphs (using generator.py and sim.py), output in "output.csv"
 ```
 auto_sim.py
 ```
